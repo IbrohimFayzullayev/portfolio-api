@@ -1,0 +1,82 @@
+# Production stack for a single VPS.
+#
+#   db        — PostgreSQL 16 (internal only, data on a named volume)
+#   api       — Go API (image built in CI, pushed to ghcr.io)
+#   web       — public Next.js site
+#   dashboard — admin Next.js CMS
+#   caddy     — reverse proxy + automatic HTTPS (Let's Encrypt)
+#
+# Variable values come from the sibling `.env` file (see .env.prod.example).
+# Deploy from /opt/portfolio on the server:
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+
+name: portfolio
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  api:
+    image: ${REGISTRY}/portfolio-api:${TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TTL_HOURS: ${JWT_TTL_HOURS:-24}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    networks: [internal]
+
+  web:
+    image: ${REGISTRY}/portfolio:${TAG:-latest}
+    restart: unless-stopped
+    depends_on: [api]
+    networks: [internal]
+
+  dashboard:
+    image: ${REGISTRY}/portfolio-dashboard:${TAG:-latest}
+    restart: unless-stopped
+    depends_on: [api]
+    networks: [internal]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [web, dashboard, api]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [internal]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:

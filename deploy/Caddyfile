@@ -1,0 +1,21 @@
+# Caddy obtains and renews Let's Encrypt certificates automatically for every
+# domain below. Requirements: ports 80 + 443 open, and DNS A/AAAA records for
+# each domain pointing to this server's IP.
+
+# Public website (apex + www)
+{$PUBLIC_DOMAIN}, www.{$PUBLIC_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy web:3000
+}
+
+# Go API
+{$API_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy api:8080
+}
+
+# Admin dashboard
+{$DASHBOARD_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy dashboard:3001
+}

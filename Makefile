@@ -1,4 +1,4 @@
-.PHONY: help setup db-up db-down db-logs run build tidy generate test seed
+.PHONY: help setup db-up db-down db-logs run build tidy generate test test-integration seed
 
 DATABASE_URL ?= postgres://portfolio:portfolio@localhost:5432/portfolio?sslmode=disable
 
@@ -37,5 +37,12 @@ db-logs: ## Tail the database logs
 generate: ## (Optional) Regenerate internal/db from db/queries with sqlc
 	sqlc generate
 
-test: ## Run tests
+test: ## Run unit tests only (fast, no database needed)
 	go test ./...
+
+test-integration: db-up ## Run unit + integration tests against a throwaway portfolio_test DB
+	@echo "Preparing throwaway test database (portfolio_test)..."
+	@docker compose exec -T db psql -U portfolio -d postgres -c "DROP DATABASE IF EXISTS portfolio_test;" >/dev/null
+	@docker compose exec -T db psql -U portfolio -d postgres -c "CREATE DATABASE portfolio_test;" >/dev/null
+	TEST_DATABASE_URL=postgres://portfolio:portfolio@localhost:5432/portfolio_test?sslmode=disable \
+		go test ./... -count=1 -v

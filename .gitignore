@@ -13,3 +13,6 @@ vendor/
 
 # os
 .DS_Store
+
+# compiled binary at repo root
+/api

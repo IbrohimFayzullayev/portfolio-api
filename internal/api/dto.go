@@ -210,6 +210,93 @@ func toProjectResponses(items []db.Project) []projectResponse {
 	return out
 }
 
+/* ---------------------------- invitation DTOs ---------------------------- */
+
+type invitationInput struct {
+	Source     string `json:"source"`
+	SessionID  string `json:"session_id"`
+	Date       string `json:"date"`
+	Time       string `json:"time"`
+	FoodID     string `json:"food_id"`
+	FoodLabel  string `json:"food_label"`
+	FoodEmoji  string `json:"food_emoji"`
+	PlaceID    string `json:"place_id"`
+	PlaceLabel string `json:"place_label"`
+	PlaceEmoji string `json:"place_emoji"`
+	InviteText string `json:"invite_text"`
+}
+
+func (in *invitationInput) validate() error {
+	if _, err := time.Parse(dateLayout, strings.TrimSpace(in.Date)); err != nil {
+		return fmt.Errorf("date must be in YYYY-MM-DD format")
+	}
+	if strings.TrimSpace(in.Time) == "" {
+		return fmt.Errorf("time is required")
+	}
+	if strings.TrimSpace(in.FoodLabel) == "" && strings.TrimSpace(in.PlaceLabel) == "" {
+		return fmt.Errorf("at least one of food or place is required")
+	}
+	return nil
+}
+
+type invitationResponse struct {
+	ID         uuid.UUID `json:"id"`
+	Source     string    `json:"source"`
+	SessionID  string    `json:"session_id"`
+	Date       string    `json:"date"`
+	Time       string    `json:"time"`
+	FoodID     string    `json:"food_id"`
+	FoodLabel  string    `json:"food_label"`
+	FoodEmoji  string    `json:"food_emoji"`
+	PlaceID    string    `json:"place_id"`
+	PlaceLabel string    `json:"place_label"`
+	PlaceEmoji string    `json:"place_emoji"`
+	InviteText string    `json:"invite_text"`
+	UserAgent  string    `json:"user_agent"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type invitationListResponse struct {
+	Items []invitationResponse `json:"items"`
+	Total int64                `json:"total"`
+}
+
+func toInvitationResponse(v db.Invitation) invitationResponse {
+	return invitationResponse{
+		ID:         v.ID,
+		Source:     v.Source,
+		SessionID:  v.SessionID,
+		Date:       v.EventDate.Format(dateLayout),
+		Time:       v.EventTime,
+		FoodID:     v.FoodID,
+		FoodLabel:  v.FoodLabel,
+		FoodEmoji:  v.FoodEmoji,
+		PlaceID:    v.PlaceID,
+		PlaceLabel: v.PlaceLabel,
+		PlaceEmoji: v.PlaceEmoji,
+		InviteText: v.InviteText,
+		UserAgent:  v.UserAgent,
+		CreatedAt:  v.CreatedAt,
+	}
+}
+
+func toInvitationResponses(items []db.Invitation) []invitationResponse {
+	out := make([]invitationResponse, 0, len(items))
+	for _, v := range items {
+		out = append(out, toInvitationResponse(v))
+	}
+	return out
+}
+
+func clampField(s string, max int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
+}
+
 /* -------------------------------- helpers -------------------------------- */
 
 func nonNil(s []string) []string {

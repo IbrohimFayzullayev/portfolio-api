@@ -21,6 +21,9 @@ type Server struct {
 	q      *db.Queries
 	tokens *auth.TokenManager
 	router *chi.Mux
+
+	// Guards the one public write endpoint (invitation submissions).
+	invLimiter *rateLimiter
 }
 
 func NewServer(cfg *config.Config, pool *pgxpool.Pool) *Server {
@@ -29,6 +32,9 @@ func NewServer(cfg *config.Config, pool *pgxpool.Pool) *Server {
 		pool:   pool,
 		q:      db.New(pool),
 		tokens: auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL),
+		// 10 submissions per IP per hour is far above real use and far below
+		// anything worth calling spam.
+		invLimiter: newRateLimiter(10, time.Hour),
 	}
 	s.router = s.routes()
 	return s
@@ -68,6 +74,11 @@ func (s *Server) routes() *chi.Mux {
 			r.Get("/posts/{locale}/{slug}", s.handlePublicGetPost)
 			r.Get("/projects", s.handlePublicListProjects)
 			r.Get("/projects/{locale}/{slug}", s.handlePublicGetProject)
+
+			// Write endpoint for the standalone invitation site. Public by
+			// necessity — the visitor is not a user of this system.
+			r.With(s.invLimiter.middleware).
+				Post("/invitations", s.handleCreateInvitation)
 		})
 
 		r.Group(func(r chi.Router) {
@@ -80,6 +91,13 @@ func (s *Server) routes() *chi.Mux {
 				r.Put("/{id}", s.handleUpdatePost)
 				r.Patch("/{id}/publish", s.handlePublishPost)
 				r.Delete("/{id}", s.handleDeletePost)
+			})
+
+			// Submissions from the invitation site — read-only from here.
+			r.Route("/invitations", func(r chi.Router) {
+				r.Get("/", s.handleListInvitations)
+				r.Get("/{id}", s.handleGetInvitation)
+				r.Delete("/{id}", s.handleDeleteInvitation)
 			})
 
 			r.Route("/projects", func(r chi.Router) {

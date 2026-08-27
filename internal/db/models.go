@@ -10,6 +10,23 @@ import (
 	"github.com/google/uuid"
 )
 
+type Invitation struct {
+	ID         uuid.UUID `json:"id"`
+	Source     string    `json:"source"`
+	SessionID  string    `json:"session_id"`
+	EventDate  time.Time `json:"event_date"`
+	EventTime  string    `json:"event_time"`
+	FoodID     string    `json:"food_id"`
+	FoodLabel  string    `json:"food_label"`
+	FoodEmoji  string    `json:"food_emoji"`
+	PlaceID    string    `json:"place_id"`
+	PlaceLabel string    `json:"place_label"`
+	PlaceEmoji string    `json:"place_emoji"`
+	InviteText string    `json:"invite_text"`
+	UserAgent  string    `json:"user_agent"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type Post struct {
 	ID          uuid.UUID  `json:"id"`
 	Locale      string     `json:"locale"`

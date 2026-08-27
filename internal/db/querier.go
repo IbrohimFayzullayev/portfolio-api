@@ -11,18 +11,23 @@ import (
 )
 
 type Querier interface {
+	CountInvitations(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
+	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreatePost(ctx context.Context, arg CreatePostParams) (Post, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteInvitation(ctx context.Context, id uuid.UUID) error
 	DeletePost(ctx context.Context, id uuid.UUID) error
 	DeleteProject(ctx context.Context, id uuid.UUID) error
+	GetInvitationByID(ctx context.Context, id uuid.UUID) (Invitation, error)
 	GetPostByID(ctx context.Context, id uuid.UUID) (Post, error)
 	GetProjectByID(ctx context.Context, id uuid.UUID) (Project, error)
 	GetPublishedPostBySlug(ctx context.Context, arg GetPublishedPostBySlugParams) (Post, error)
 	GetPublishedProjectBySlug(ctx context.Context, arg GetPublishedProjectBySlugParams) (Project, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	ListInvitations(ctx context.Context, arg ListInvitationsParams) ([]Invitation, error)
 	ListPosts(ctx context.Context, arg ListPostsParams) ([]Post, error)
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
 	ListPublishedPosts(ctx context.Context, locale *string) ([]Post, error)

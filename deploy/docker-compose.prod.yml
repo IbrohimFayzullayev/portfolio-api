@@ -44,6 +44,26 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS}
     networks: [internal]
 
+  # Operations bot. Same image as `api`, different entrypoint — running it as
+  # its own container is the point: a monitor that lives inside the thing it
+  # monitors goes quiet exactly when you need it.
+  bot:
+    image: ${REGISTRY}/portfolio-api:${TAG:-latest}
+    entrypoint: ["/app/bot"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID}
+      INTERNAL_API_URL: http://api:8080
+      PUBLIC_SITE_URL: https://${PUBLIC_DOMAIN}
+      ADMIN_SITE_URL: https://${DASHBOARD_DOMAIN}
+      PUBLIC_API_URL: https://${API_DOMAIN}
+    networks: [internal]
+
   web:
     image: ${REGISTRY}/portfolio:${TAG:-latest}
     restart: unless-stopped

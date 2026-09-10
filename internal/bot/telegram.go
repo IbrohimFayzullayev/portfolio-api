@@ -14,7 +14,7 @@ import (
 // Minimal Telegram Bot API client.
 //
 // Deliberately written against net/http instead of pulling in a bot framework:
-// this bot uses exactly two endpoints, and an extra dependency in the API's
+// this bot uses a handful of endpoints, and an extra dependency in the API's
 // go.mod would have to be justified for the whole module.
 
 const telegramAPI = "https://api.telegram.org"
@@ -36,8 +36,31 @@ func newTelegramClient(token string) *telegramClient {
 /* ------------------------------- payloads -------------------------------- */
 
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
+}
+
+// CallbackQuery arrives when an inline button is pressed. Telegram shows a
+// loading spinner on the button until answerCallback is called, so every
+// handler must answer even when it has nothing to say.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    *User    `json:"from"`
+	Message *Message `json:"message"`
+	Data    string   `json:"data"`
+}
+
+/* ---------------------------- inline keyboards --------------------------- */
+
+type inlineButton struct {
+	Text string `json:"text"`
+	// Max 64 bytes, Telegram's limit. A UUID with a short prefix fits.
+	CallbackData string `json:"callback_data"`
+}
+
+type inlineKeyboard struct {
+	InlineKeyboard [][]inlineButton `json:"inline_keyboard"`
 }
 
 type Message struct {
@@ -111,17 +134,57 @@ func (c *telegramClient) getUpdates(ctx context.Context, offset int64, timeout i
 	err := c.call(ctx, "getUpdates", map[string]any{
 		"offset":          offset,
 		"timeout":         timeout,
-		"allowed_updates": []string{"message"},
+		"allowed_updates": []string{"message", "callback_query"},
 	}, &updates)
 	return updates, err
 }
 
 func (c *telegramClient) sendMessage(ctx context.Context, chatID int64, text string) error {
-	return c.call(ctx, "sendMessage", map[string]any{
+	return c.sendMessageMarkup(ctx, chatID, text, nil)
+}
+
+// sendMessageMarkup sends with an optional inline keyboard. A nil markup is
+// omitted from the payload entirely rather than sent as null, which Telegram
+// rejects.
+func (c *telegramClient) sendMessageMarkup(
+	ctx context.Context, chatID int64, text string, markup *inlineKeyboard,
+) error {
+	body := map[string]any{
 		"chat_id":                  chatID,
 		"text":                     text,
 		"parse_mode":               "HTML",
 		"disable_web_page_preview": true,
+	}
+	if markup != nil {
+		body["reply_markup"] = markup
+	}
+	return c.call(ctx, "sendMessage", body, nil)
+}
+
+// editMessageText replaces a message in place — how a pressed button updates
+// the list it came from instead of sending a second copy of it.
+func (c *telegramClient) editMessageText(
+	ctx context.Context, chatID, messageID int64, text string, markup *inlineKeyboard,
+) error {
+	body := map[string]any{
+		"chat_id":                  chatID,
+		"message_id":               messageID,
+		"text":                     text,
+		"parse_mode":               "HTML",
+		"disable_web_page_preview": true,
+	}
+	if markup != nil {
+		body["reply_markup"] = markup
+	}
+	return c.call(ctx, "editMessageText", body, nil)
+}
+
+// answerCallback clears the button's loading spinner. Telegram leaves it
+// spinning for a few seconds otherwise, which reads as a broken bot.
+func (c *telegramClient) answerCallback(ctx context.Context, id, text string) error {
+	return c.call(ctx, "answerCallbackQuery", map[string]any{
+		"callback_query_id": id,
+		"text":              text,
 	}, nil)
 }
 

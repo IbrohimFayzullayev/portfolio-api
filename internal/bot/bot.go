@@ -74,6 +74,9 @@ func (b *Bot) Run(ctx context.Context) error {
 	// one message, not one every two minutes.
 	go b.runHealthWatch(ctx)
 
+	// One message each morning at 09:00 Asia/Tashkent.
+	go b.runDailySummary(ctx)
+
 	var backoff time.Duration
 	for {
 		if ctx.Err() != nil {
@@ -130,6 +133,11 @@ func (b *Bot) drainBacklog(ctx context.Context) (int64, error) {
 }
 
 func (b *Bot) handle(ctx context.Context, u Update) {
+	if u.CallbackQuery != nil {
+		b.handleCallback(ctx, u.CallbackQuery)
+		return
+	}
+
 	msg := u.Message
 	if msg == nil || msg.From == nil || msg.Chat == nil {
 		return
@@ -157,6 +165,20 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 
+	switch cmd {
+	case "/posts":
+		// Sent with its own keyboard, so it does not go through the plain
+		// reply path below.
+		b.sendPostsList(cctx, msg.Chat.ID)
+		return
+	case "/qoralama":
+		reply := b.createDraft(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+		if err := b.tg.sendMessage(cctx, msg.Chat.ID, reply); err != nil {
+			log.Printf("bot: sendMessage failed: %v", err)
+		}
+		return
+	}
+
 	var reply string
 	switch cmd {
 	case "/start", "/help":
@@ -165,6 +187,8 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		reply = b.statusReport(cctx)
 	case "/invitations":
 		reply = b.invitationsReport(cctx)
+	case "/kunlik":
+		reply = b.dailySummary(cctx)
 	default:
 		reply = "Bunday buyruq yo'q. /help"
 	}
@@ -174,12 +198,47 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	}
 }
 
+// handleCallback processes an inline button press.
+func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
+	if q.From == nil {
+		return
+	}
+	if q.From.ID != b.cfg.AllowedUserID {
+		log.Printf("bot: ignoring callback from unauthorised user %d", q.From.ID)
+		return
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+
+	notice := b.applyPostAction(cctx, q.Data)
+
+	// Always answer, even on failure: an unanswered callback leaves the button
+	// spinning and the bot looking dead.
+	if err := b.tg.answerCallback(cctx, q.ID, notice); err != nil {
+		log.Printf("bot: answerCallback failed: %v", err)
+	}
+
+	// Redraw the list in place so the new state is visible immediately.
+	if q.Message != nil && q.Message.Chat != nil {
+		text, markup := b.postsList(cctx)
+		if err := b.tg.editMessageText(
+			cctx, q.Message.Chat.ID, q.Message.MessageID, text, markup,
+		); err != nil {
+			log.Printf("bot: editMessageText failed: %v", err)
+		}
+	}
+}
+
 func helpText() string {
 	return strings.Join([]string{
 		"<b>Platforma boti</b>",
 		"",
 		"/status — stack holati (tashqi + ichki)",
+		"/posts — oxirgi postlar, nashr tugmalari bilan",
+		"/qoralama &lt;matn&gt; — birinchi qator sarlavha, qolgani matn",
 		"/invitations — oxirgi taklifnomalar",
+		"/kunlik — bugungi qisqacha hisobot",
 		"/help — shu ro'yxat",
 	}, "\n")
 }

@@ -188,6 +188,10 @@ func (b *Bot) renderNotification(n notification) string {
 			escapeHTML(str(n.payload, "label")),
 			escapeHTML(str(n.payload, "detail")))
 
+	case "daily.summary":
+		// Already rendered when it was queued — see dailySummary.
+		return str(n.payload, "text")
+
 	case "health.recovered":
 		return fmt.Sprintf("🟢 <b>Servis tiklandi</b>\n\n%s",
 			escapeHTML(str(n.payload, "label")))

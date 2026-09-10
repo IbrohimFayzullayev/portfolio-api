@@ -10,9 +10,9 @@ SELECT * FROM projects WHERE id = $1;
 -- name: CreateProject :one
 INSERT INTO projects (
     locale, slug, title, description, body, tags, stack, url, repo,
-    sort_order, featured, draft, content_date
+    sort_order, featured, draft, content_date, translation_key
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 )
 RETURNING *;
 
@@ -31,6 +31,7 @@ SET locale = $2,
     featured = $12,
     draft = $13,
     content_date = $14,
+    translation_key = $15,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -51,9 +52,9 @@ WHERE draft = false AND locale = $1 AND slug = $2;
 -- name: UpsertProject :one
 INSERT INTO projects (
     locale, slug, title, description, body, tags, stack, url, repo,
-    sort_order, featured, draft, content_date
+    sort_order, featured, draft, content_date, translation_key
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 )
 ON CONFLICT (locale, slug) DO UPDATE SET
     title = EXCLUDED.title,
@@ -67,5 +68,12 @@ ON CONFLICT (locale, slug) DO UPDATE SET
     featured = EXCLUDED.featured,
     draft = EXCLUDED.draft,
     content_date = EXCLUDED.content_date,
+    translation_key = EXCLUDED.translation_key,
     updated_at = now()
 RETURNING *;
+
+-- name: ListPublishedProjectSiblings :many
+SELECT locale, slug FROM projects
+WHERE draft = false
+  AND translation_key <> ''
+  AND translation_key = $1;

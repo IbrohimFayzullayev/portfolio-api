@@ -63,6 +63,17 @@ func (b *Bot) Run(ctx context.Context) error {
 		log.Printf("bot: could not drain backlog: %v", err)
 	}
 
+	// The outbox is the opposite: notifications queued while the bot was down
+	// ARE still wanted, and go out on the first tick. It runs beside the poll
+	// loop rather than inside it — a 30-second long-poll must not delay a
+	// deploy or health message by 30 seconds.
+	go b.runOutbox(ctx)
+
+	// Watches the same endpoints /status reports on, but notifies only when the
+	// verdict changes: a service that has been down for an hour should produce
+	// one message, not one every two minutes.
+	go b.runHealthWatch(ctx)
+
 	var backoff time.Duration
 	for {
 		if ctx.Err() != nil {

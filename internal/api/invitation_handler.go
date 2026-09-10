@@ -45,6 +45,18 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Queued, not sent: the row is already safe in the database, so the visitor
+	// gets their answer whether or not Telegram is reachable.
+	s.notify("invitation.created", map[string]any{
+		"source":      source,
+		"date":        in.Date,
+		"time":        clampField(in.Time, 40),
+		"food_label":  clampField(in.FoodLabel, 120),
+		"food_emoji":  clampField(in.FoodEmoji, 16),
+		"place_label": clampField(in.PlaceLabel, 120),
+		"place_emoji": clampField(in.PlaceEmoji, 16),
+	})
+
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "received"})
 }
 

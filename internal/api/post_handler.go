@@ -80,6 +80,7 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		Draft:       in.Draft,
 		ContentDate: parseContentDate(in.Date),
 		PublishedAt: publishedAtFor(in.Draft, nil),
+		TranslationKey: in.TranslationKey,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -132,6 +133,7 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 		Draft:       in.Draft,
 		ContentDate: parseContentDate(in.Date),
 		PublishedAt: publishedAtFor(in.Draft, existing.PublishedAt),
+		TranslationKey: in.TranslationKey,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -177,6 +179,15 @@ func (s *Server) handlePublishPost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update publish state")
 		return
+	}
+	// Only on the draft -> published edge. Re-saving a published post is not
+	// news, and announcing it again would be noise.
+	if existing.Draft && !post.Draft {
+		s.notify("post.published", map[string]any{
+			"locale": post.Locale,
+			"slug":   post.Slug,
+			"title":  post.Title,
+		})
 	}
 	writeJSON(w, http.StatusOK, toPostResponse(post))
 }

@@ -97,6 +97,20 @@ jobs:
             docker compose -f docker-compose.prod.yml --env-file .env pull api
             docker compose -f docker-compose.prod.yml --env-file .env up -d api
 
+            # A 200 from the site proves SOMETHING is answering, not that it is
+            # the new build — the previous container answers 200 just as well.
+            # Compare the running container's image id with the one we just
+            # pulled, so a deploy that quietly kept the old image fails here
+            # instead of being reported green.
+            want=$(docker image inspect "$REGISTRY/portfolio-api:$TAG" --format '{{.Id}}')
+            got=$(docker inspect "$(docker compose -f docker-compose.prod.yml ps -q api)" --format '{{.Image}}')
+            if [ "$want" != "$got" ]; then
+              echo "FAILED: api is still running $got, expected $want"
+              docker compose -f docker-compose.prod.yml ps api
+              exit 1
+            fi
+            echo "image ok: api -> $TAG"
+
             for i in $(seq 1 20); do
               if curl -fsS "https://$API_DOMAIN/healthz" >/dev/null; then
                 echo "healthy: $API_DOMAIN/healthz"

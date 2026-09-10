@@ -27,40 +27,52 @@ type Invitation struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type Notification struct {
+	ID        int64      `json:"id"`
+	Kind      string     `json:"kind"`
+	Payload   []byte     `json:"payload"`
+	CreatedAt time.Time  `json:"created_at"`
+	SentAt    *time.Time `json:"sent_at"`
+	Attempts  int32      `json:"attempts"`
+	LastError string     `json:"last_error"`
+}
+
 type Post struct {
-	ID          uuid.UUID  `json:"id"`
-	Locale      string     `json:"locale"`
-	Slug        string     `json:"slug"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Body        string     `json:"body"`
-	Tags        []string   `json:"tags"`
-	Cover       string     `json:"cover"`
-	Featured    bool       `json:"featured"`
-	Draft       bool       `json:"draft"`
-	ContentDate time.Time  `json:"content_date"`
-	PublishedAt *time.Time `json:"published_at"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID             uuid.UUID  `json:"id"`
+	Locale         string     `json:"locale"`
+	Slug           string     `json:"slug"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	Body           string     `json:"body"`
+	Tags           []string   `json:"tags"`
+	Cover          string     `json:"cover"`
+	Featured       bool       `json:"featured"`
+	Draft          bool       `json:"draft"`
+	ContentDate    time.Time  `json:"content_date"`
+	PublishedAt    *time.Time `json:"published_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	TranslationKey string     `json:"translation_key"`
 }
 
 type Project struct {
-	ID          uuid.UUID `json:"id"`
-	Locale      string    `json:"locale"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Body        string    `json:"body"`
-	Tags        []string  `json:"tags"`
-	Stack       []string  `json:"stack"`
-	Url         string    `json:"url"`
-	Repo        string    `json:"repo"`
-	SortOrder   int32     `json:"sort_order"`
-	Featured    bool      `json:"featured"`
-	Draft       bool      `json:"draft"`
-	ContentDate time.Time `json:"content_date"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	Locale         string    `json:"locale"`
+	Slug           string    `json:"slug"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	Body           string    `json:"body"`
+	Tags           []string  `json:"tags"`
+	Stack          []string  `json:"stack"`
+	Url            string    `json:"url"`
+	Repo           string    `json:"repo"`
+	SortOrder      int32     `json:"sort_order"`
+	Featured       bool      `json:"featured"`
+	Draft          bool      `json:"draft"`
+	ContentDate    time.Time `json:"content_date"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	TranslationKey string    `json:"translation_key"`
 }
 
 type User struct {

@@ -15,27 +15,28 @@ import (
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (
     locale, slug, title, description, body, tags, stack, url, repo,
-    sort_order, featured, draft, content_date
+    sort_order, featured, draft, content_date, translation_key
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 )
-RETURNING id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at
+RETURNING id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at, translation_key
 `
 
 type CreateProjectParams struct {
-	Locale      string    `json:"locale"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Body        string    `json:"body"`
-	Tags        []string  `json:"tags"`
-	Stack       []string  `json:"stack"`
-	Url         string    `json:"url"`
-	Repo        string    `json:"repo"`
-	SortOrder   int32     `json:"sort_order"`
-	Featured    bool      `json:"featured"`
-	Draft       bool      `json:"draft"`
-	ContentDate time.Time `json:"content_date"`
+	Locale         string    `json:"locale"`
+	Slug           string    `json:"slug"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	Body           string    `json:"body"`
+	Tags           []string  `json:"tags"`
+	Stack          []string  `json:"stack"`
+	Url            string    `json:"url"`
+	Repo           string    `json:"repo"`
+	SortOrder      int32     `json:"sort_order"`
+	Featured       bool      `json:"featured"`
+	Draft          bool      `json:"draft"`
+	ContentDate    time.Time `json:"content_date"`
+	TranslationKey string    `json:"translation_key"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -53,6 +54,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.Featured,
 		arg.Draft,
 		arg.ContentDate,
+		arg.TranslationKey,
 	)
 	var i Project
 	err := row.Scan(
@@ -72,6 +74,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.ContentDate,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TranslationKey,
 	)
 	return i, err
 }
@@ -86,7 +89,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id uuid.UUID) error {
 }
 
 const getProjectByID = `-- name: GetProjectByID :one
-SELECT id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at FROM projects WHERE id = $1
+SELECT id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at, translation_key FROM projects WHERE id = $1
 `
 
 func (q *Queries) GetProjectByID(ctx context.Context, id uuid.UUID) (Project, error) {
@@ -109,12 +112,48 @@ func (q *Queries) GetProjectByID(ctx context.Context, id uuid.UUID) (Project, er
 		&i.ContentDate,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TranslationKey,
+	)
+	return i, err
+}
+
+const getPublishedProjectBySlug = `-- name: GetPublishedProjectBySlug :one
+SELECT id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at, translation_key FROM projects
+WHERE draft = false AND locale = $1 AND slug = $2
+`
+
+type GetPublishedProjectBySlugParams struct {
+	Locale string `json:"locale"`
+	Slug   string `json:"slug"`
+}
+
+func (q *Queries) GetPublishedProjectBySlug(ctx context.Context, arg GetPublishedProjectBySlugParams) (Project, error) {
+	row := q.db.QueryRow(ctx, getPublishedProjectBySlug, arg.Locale, arg.Slug)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Locale,
+		&i.Slug,
+		&i.Title,
+		&i.Description,
+		&i.Body,
+		&i.Tags,
+		&i.Stack,
+		&i.Url,
+		&i.Repo,
+		&i.SortOrder,
+		&i.Featured,
+		&i.Draft,
+		&i.ContentDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TranslationKey,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at FROM projects
+SELECT id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at, translation_key FROM projects
 WHERE ($1::text IS NULL OR locale = $1)
   AND ($2::boolean IS NULL OR draft = $2)
 ORDER BY sort_order DESC, content_date DESC
@@ -151,6 +190,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.ContentDate,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TranslationKey,
 		); err != nil {
 			return nil, err
 		}
@@ -162,118 +202,40 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 	return items, nil
 }
 
-const updateProject = `-- name: UpdateProject :one
-UPDATE projects
-SET locale = $2,
-    slug = $3,
-    title = $4,
-    description = $5,
-    body = $6,
-    tags = $7,
-    stack = $8,
-    url = $9,
-    repo = $10,
-    sort_order = $11,
-    featured = $12,
-    draft = $13,
-    content_date = $14,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at
+const listPublishedProjectSiblings = `-- name: ListPublishedProjectSiblings :many
+SELECT locale, slug FROM projects
+WHERE draft = false
+  AND translation_key <> ''
+  AND translation_key = $1
 `
 
-type UpdateProjectParams struct {
-	ID          uuid.UUID `json:"id"`
-	Locale      string    `json:"locale"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Body        string    `json:"body"`
-	Tags        []string  `json:"tags"`
-	Stack       []string  `json:"stack"`
-	Url         string    `json:"url"`
-	Repo        string    `json:"repo"`
-	SortOrder   int32     `json:"sort_order"`
-	Featured    bool      `json:"featured"`
-	Draft       bool      `json:"draft"`
-	ContentDate time.Time `json:"content_date"`
-}
-
-func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
-	row := q.db.QueryRow(ctx, updateProject,
-		arg.ID,
-		arg.Locale,
-		arg.Slug,
-		arg.Title,
-		arg.Description,
-		arg.Body,
-		arg.Tags,
-		arg.Stack,
-		arg.Url,
-		arg.Repo,
-		arg.SortOrder,
-		arg.Featured,
-		arg.Draft,
-		arg.ContentDate,
-	)
-	var i Project
-	err := row.Scan(
-		&i.ID,
-		&i.Locale,
-		&i.Slug,
-		&i.Title,
-		&i.Description,
-		&i.Body,
-		&i.Tags,
-		&i.Stack,
-		&i.Url,
-		&i.Repo,
-		&i.SortOrder,
-		&i.Featured,
-		&i.Draft,
-		&i.ContentDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getPublishedProjectBySlug = `-- name: GetPublishedProjectBySlug :one
-SELECT id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at FROM projects
-WHERE draft = false AND locale = $1 AND slug = $2
-`
-
-type GetPublishedProjectBySlugParams struct {
+type ListPublishedProjectSiblingsRow struct {
 	Locale string `json:"locale"`
 	Slug   string `json:"slug"`
 }
 
-func (q *Queries) GetPublishedProjectBySlug(ctx context.Context, arg GetPublishedProjectBySlugParams) (Project, error) {
-	row := q.db.QueryRow(ctx, getPublishedProjectBySlug, arg.Locale, arg.Slug)
-	var i Project
-	err := row.Scan(
-		&i.ID,
-		&i.Locale,
-		&i.Slug,
-		&i.Title,
-		&i.Description,
-		&i.Body,
-		&i.Tags,
-		&i.Stack,
-		&i.Url,
-		&i.Repo,
-		&i.SortOrder,
-		&i.Featured,
-		&i.Draft,
-		&i.ContentDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) ListPublishedProjectSiblings(ctx context.Context, translationKey string) ([]ListPublishedProjectSiblingsRow, error) {
+	rows, err := q.db.Query(ctx, listPublishedProjectSiblings, translationKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPublishedProjectSiblingsRow{}
+	for rows.Next() {
+		var i ListPublishedProjectSiblingsRow
+		if err := rows.Scan(&i.Locale, &i.Slug); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPublishedProjects = `-- name: ListPublishedProjects :many
-SELECT id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at FROM projects
+SELECT id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at, translation_key FROM projects
 WHERE draft = false
   AND ($1::text IS NULL OR locale = $1)
 ORDER BY sort_order DESC, content_date DESC
@@ -305,6 +267,7 @@ func (q *Queries) ListPublishedProjects(ctx context.Context, locale *string) ([]
 			&i.ContentDate,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TranslationKey,
 		); err != nil {
 			return nil, err
 		}
@@ -316,47 +279,48 @@ func (q *Queries) ListPublishedProjects(ctx context.Context, locale *string) ([]
 	return items, nil
 }
 
-const upsertProject = `-- name: UpsertProject :one
-INSERT INTO projects (
-    locale, slug, title, description, body, tags, stack, url, repo,
-    sort_order, featured, draft, content_date
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-)
-ON CONFLICT (locale, slug) DO UPDATE SET
-    title = EXCLUDED.title,
-    description = EXCLUDED.description,
-    body = EXCLUDED.body,
-    tags = EXCLUDED.tags,
-    stack = EXCLUDED.stack,
-    url = EXCLUDED.url,
-    repo = EXCLUDED.repo,
-    sort_order = EXCLUDED.sort_order,
-    featured = EXCLUDED.featured,
-    draft = EXCLUDED.draft,
-    content_date = EXCLUDED.content_date,
+const updateProject = `-- name: UpdateProject :one
+UPDATE projects
+SET locale = $2,
+    slug = $3,
+    title = $4,
+    description = $5,
+    body = $6,
+    tags = $7,
+    stack = $8,
+    url = $9,
+    repo = $10,
+    sort_order = $11,
+    featured = $12,
+    draft = $13,
+    content_date = $14,
+    translation_key = $15,
     updated_at = now()
-RETURNING id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at
+WHERE id = $1
+RETURNING id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at, translation_key
 `
 
-type UpsertProjectParams struct {
-	Locale      string    `json:"locale"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Body        string    `json:"body"`
-	Tags        []string  `json:"tags"`
-	Stack       []string  `json:"stack"`
-	Url         string    `json:"url"`
-	Repo        string    `json:"repo"`
-	SortOrder   int32     `json:"sort_order"`
-	Featured    bool      `json:"featured"`
-	Draft       bool      `json:"draft"`
-	ContentDate time.Time `json:"content_date"`
+type UpdateProjectParams struct {
+	ID             uuid.UUID `json:"id"`
+	Locale         string    `json:"locale"`
+	Slug           string    `json:"slug"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	Body           string    `json:"body"`
+	Tags           []string  `json:"tags"`
+	Stack          []string  `json:"stack"`
+	Url            string    `json:"url"`
+	Repo           string    `json:"repo"`
+	SortOrder      int32     `json:"sort_order"`
+	Featured       bool      `json:"featured"`
+	Draft          bool      `json:"draft"`
+	ContentDate    time.Time `json:"content_date"`
+	TranslationKey string    `json:"translation_key"`
 }
 
-func (q *Queries) UpsertProject(ctx context.Context, arg UpsertProjectParams) (Project, error) {
-	row := q.db.QueryRow(ctx, upsertProject,
+func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
+	row := q.db.QueryRow(ctx, updateProject,
+		arg.ID,
 		arg.Locale,
 		arg.Slug,
 		arg.Title,
@@ -370,6 +334,7 @@ func (q *Queries) UpsertProject(ctx context.Context, arg UpsertProjectParams) (P
 		arg.Featured,
 		arg.Draft,
 		arg.ContentDate,
+		arg.TranslationKey,
 	)
 	var i Project
 	err := row.Scan(
@@ -389,6 +354,88 @@ func (q *Queries) UpsertProject(ctx context.Context, arg UpsertProjectParams) (P
 		&i.ContentDate,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TranslationKey,
+	)
+	return i, err
+}
+
+const upsertProject = `-- name: UpsertProject :one
+INSERT INTO projects (
+    locale, slug, title, description, body, tags, stack, url, repo,
+    sort_order, featured, draft, content_date, translation_key
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+)
+ON CONFLICT (locale, slug) DO UPDATE SET
+    title = EXCLUDED.title,
+    description = EXCLUDED.description,
+    body = EXCLUDED.body,
+    tags = EXCLUDED.tags,
+    stack = EXCLUDED.stack,
+    url = EXCLUDED.url,
+    repo = EXCLUDED.repo,
+    sort_order = EXCLUDED.sort_order,
+    featured = EXCLUDED.featured,
+    draft = EXCLUDED.draft,
+    content_date = EXCLUDED.content_date,
+    translation_key = EXCLUDED.translation_key,
+    updated_at = now()
+RETURNING id, locale, slug, title, description, body, tags, stack, url, repo, sort_order, featured, draft, content_date, created_at, updated_at, translation_key
+`
+
+type UpsertProjectParams struct {
+	Locale         string    `json:"locale"`
+	Slug           string    `json:"slug"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	Body           string    `json:"body"`
+	Tags           []string  `json:"tags"`
+	Stack          []string  `json:"stack"`
+	Url            string    `json:"url"`
+	Repo           string    `json:"repo"`
+	SortOrder      int32     `json:"sort_order"`
+	Featured       bool      `json:"featured"`
+	Draft          bool      `json:"draft"`
+	ContentDate    time.Time `json:"content_date"`
+	TranslationKey string    `json:"translation_key"`
+}
+
+func (q *Queries) UpsertProject(ctx context.Context, arg UpsertProjectParams) (Project, error) {
+	row := q.db.QueryRow(ctx, upsertProject,
+		arg.Locale,
+		arg.Slug,
+		arg.Title,
+		arg.Description,
+		arg.Body,
+		arg.Tags,
+		arg.Stack,
+		arg.Url,
+		arg.Repo,
+		arg.SortOrder,
+		arg.Featured,
+		arg.Draft,
+		arg.ContentDate,
+		arg.TranslationKey,
+	)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Locale,
+		&i.Slug,
+		&i.Title,
+		&i.Description,
+		&i.Body,
+		&i.Tags,
+		&i.Stack,
+		&i.Url,
+		&i.Repo,
+		&i.SortOrder,
+		&i.Featured,
+		&i.Draft,
+		&i.ContentDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TranslationKey,
 	)
 	return i, err
 }

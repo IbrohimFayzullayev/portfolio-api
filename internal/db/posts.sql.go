@@ -15,25 +15,26 @@ import (
 const createPost = `-- name: CreatePost :one
 INSERT INTO posts (
     locale, slug, title, description, body, tags, cover,
-    featured, draft, content_date, published_at
+    featured, draft, content_date, published_at, translation_key
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
-RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at
+RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key
 `
 
 type CreatePostParams struct {
-	Locale      string     `json:"locale"`
-	Slug        string     `json:"slug"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Body        string     `json:"body"`
-	Tags        []string   `json:"tags"`
-	Cover       string     `json:"cover"`
-	Featured    bool       `json:"featured"`
-	Draft       bool       `json:"draft"`
-	ContentDate time.Time  `json:"content_date"`
-	PublishedAt *time.Time `json:"published_at"`
+	Locale         string     `json:"locale"`
+	Slug           string     `json:"slug"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	Body           string     `json:"body"`
+	Tags           []string   `json:"tags"`
+	Cover          string     `json:"cover"`
+	Featured       bool       `json:"featured"`
+	Draft          bool       `json:"draft"`
+	ContentDate    time.Time  `json:"content_date"`
+	PublishedAt    *time.Time `json:"published_at"`
+	TranslationKey string     `json:"translation_key"`
 }
 
 func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, error) {
@@ -49,6 +50,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 		arg.Draft,
 		arg.ContentDate,
 		arg.PublishedAt,
+		arg.TranslationKey,
 	)
 	var i Post
 	err := row.Scan(
@@ -66,6 +68,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 		&i.PublishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TranslationKey,
 	)
 	return i, err
 }
@@ -80,7 +83,7 @@ func (q *Queries) DeletePost(ctx context.Context, id uuid.UUID) error {
 }
 
 const getPostByID = `-- name: GetPostByID :one
-SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at FROM posts WHERE id = $1
+SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key FROM posts WHERE id = $1
 `
 
 func (q *Queries) GetPostByID(ctx context.Context, id uuid.UUID) (Post, error) {
@@ -101,12 +104,46 @@ func (q *Queries) GetPostByID(ctx context.Context, id uuid.UUID) (Post, error) {
 		&i.PublishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TranslationKey,
+	)
+	return i, err
+}
+
+const getPublishedPostBySlug = `-- name: GetPublishedPostBySlug :one
+SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key FROM posts
+WHERE draft = false AND locale = $1 AND slug = $2
+`
+
+type GetPublishedPostBySlugParams struct {
+	Locale string `json:"locale"`
+	Slug   string `json:"slug"`
+}
+
+func (q *Queries) GetPublishedPostBySlug(ctx context.Context, arg GetPublishedPostBySlugParams) (Post, error) {
+	row := q.db.QueryRow(ctx, getPublishedPostBySlug, arg.Locale, arg.Slug)
+	var i Post
+	err := row.Scan(
+		&i.ID,
+		&i.Locale,
+		&i.Slug,
+		&i.Title,
+		&i.Description,
+		&i.Body,
+		&i.Tags,
+		&i.Cover,
+		&i.Featured,
+		&i.Draft,
+		&i.ContentDate,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TranslationKey,
 	)
 	return i, err
 }
 
 const listPosts = `-- name: ListPosts :many
-SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at FROM posts
+SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key FROM posts
 WHERE ($1::text IS NULL OR locale = $1)
   AND ($2::boolean IS NULL OR draft = $2)
 ORDER BY content_date DESC, created_at DESC
@@ -141,6 +178,7 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]Post, e
 			&i.PublishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TranslationKey,
 		); err != nil {
 			return nil, err
 		}
@@ -152,145 +190,42 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]Post, e
 	return items, nil
 }
 
-const setPostPublished = `-- name: SetPostPublished :one
-UPDATE posts
-SET draft = $2,
-    published_at = $3,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at
+const listPublishedPostSiblings = `-- name: ListPublishedPostSiblings :many
+SELECT locale, slug FROM posts
+WHERE draft = false
+  AND translation_key <> ''
+  AND translation_key = $1
 `
 
-type SetPostPublishedParams struct {
-	ID          uuid.UUID  `json:"id"`
-	Draft       bool       `json:"draft"`
-	PublishedAt *time.Time `json:"published_at"`
-}
-
-func (q *Queries) SetPostPublished(ctx context.Context, arg SetPostPublishedParams) (Post, error) {
-	row := q.db.QueryRow(ctx, setPostPublished, arg.ID, arg.Draft, arg.PublishedAt)
-	var i Post
-	err := row.Scan(
-		&i.ID,
-		&i.Locale,
-		&i.Slug,
-		&i.Title,
-		&i.Description,
-		&i.Body,
-		&i.Tags,
-		&i.Cover,
-		&i.Featured,
-		&i.Draft,
-		&i.ContentDate,
-		&i.PublishedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const updatePost = `-- name: UpdatePost :one
-UPDATE posts
-SET locale = $2,
-    slug = $3,
-    title = $4,
-    description = $5,
-    body = $6,
-    tags = $7,
-    cover = $8,
-    featured = $9,
-    draft = $10,
-    content_date = $11,
-    published_at = $12,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at
-`
-
-type UpdatePostParams struct {
-	ID          uuid.UUID  `json:"id"`
-	Locale      string     `json:"locale"`
-	Slug        string     `json:"slug"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Body        string     `json:"body"`
-	Tags        []string   `json:"tags"`
-	Cover       string     `json:"cover"`
-	Featured    bool       `json:"featured"`
-	Draft       bool       `json:"draft"`
-	ContentDate time.Time  `json:"content_date"`
-	PublishedAt *time.Time `json:"published_at"`
-}
-
-func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) (Post, error) {
-	row := q.db.QueryRow(ctx, updatePost,
-		arg.ID,
-		arg.Locale,
-		arg.Slug,
-		arg.Title,
-		arg.Description,
-		arg.Body,
-		arg.Tags,
-		arg.Cover,
-		arg.Featured,
-		arg.Draft,
-		arg.ContentDate,
-		arg.PublishedAt,
-	)
-	var i Post
-	err := row.Scan(
-		&i.ID,
-		&i.Locale,
-		&i.Slug,
-		&i.Title,
-		&i.Description,
-		&i.Body,
-		&i.Tags,
-		&i.Cover,
-		&i.Featured,
-		&i.Draft,
-		&i.ContentDate,
-		&i.PublishedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getPublishedPostBySlug = `-- name: GetPublishedPostBySlug :one
-SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at FROM posts
-WHERE draft = false AND locale = $1 AND slug = $2
-`
-
-type GetPublishedPostBySlugParams struct {
+type ListPublishedPostSiblingsRow struct {
 	Locale string `json:"locale"`
 	Slug   string `json:"slug"`
 }
 
-func (q *Queries) GetPublishedPostBySlug(ctx context.Context, arg GetPublishedPostBySlugParams) (Post, error) {
-	row := q.db.QueryRow(ctx, getPublishedPostBySlug, arg.Locale, arg.Slug)
-	var i Post
-	err := row.Scan(
-		&i.ID,
-		&i.Locale,
-		&i.Slug,
-		&i.Title,
-		&i.Description,
-		&i.Body,
-		&i.Tags,
-		&i.Cover,
-		&i.Featured,
-		&i.Draft,
-		&i.ContentDate,
-		&i.PublishedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+// Every published row sharing this translation key, in any locale. The public
+// site turns these into hreflang alternates.
+func (q *Queries) ListPublishedPostSiblings(ctx context.Context, translationKey string) ([]ListPublishedPostSiblingsRow, error) {
+	rows, err := q.db.Query(ctx, listPublishedPostSiblings, translationKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPublishedPostSiblingsRow{}
+	for rows.Next() {
+		var i ListPublishedPostSiblingsRow
+		if err := rows.Scan(&i.Locale, &i.Slug); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPublishedPosts = `-- name: ListPublishedPosts :many
-SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at FROM posts
+SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key FROM posts
 WHERE draft = false
   AND ($1::text IS NULL OR locale = $1)
 ORDER BY content_date DESC, created_at DESC
@@ -320,6 +255,7 @@ func (q *Queries) ListPublishedPosts(ctx context.Context, locale *string) ([]Pos
 			&i.PublishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TranslationKey,
 		); err != nil {
 			return nil, err
 		}
@@ -331,43 +267,82 @@ func (q *Queries) ListPublishedPosts(ctx context.Context, locale *string) ([]Pos
 	return items, nil
 }
 
-const upsertPost = `-- name: UpsertPost :one
-INSERT INTO posts (
-    locale, slug, title, description, body, tags, cover,
-    featured, draft, content_date, published_at
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-)
-ON CONFLICT (locale, slug) DO UPDATE SET
-    title = EXCLUDED.title,
-    description = EXCLUDED.description,
-    body = EXCLUDED.body,
-    tags = EXCLUDED.tags,
-    cover = EXCLUDED.cover,
-    featured = EXCLUDED.featured,
-    draft = EXCLUDED.draft,
-    content_date = EXCLUDED.content_date,
-    published_at = EXCLUDED.published_at,
+const setPostPublished = `-- name: SetPostPublished :one
+UPDATE posts
+SET draft = $2,
+    published_at = $3,
     updated_at = now()
-RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at
+WHERE id = $1
+RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key
 `
 
-type UpsertPostParams struct {
-	Locale      string     `json:"locale"`
-	Slug        string     `json:"slug"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Body        string     `json:"body"`
-	Tags        []string   `json:"tags"`
-	Cover       string     `json:"cover"`
-	Featured    bool       `json:"featured"`
+type SetPostPublishedParams struct {
+	ID          uuid.UUID  `json:"id"`
 	Draft       bool       `json:"draft"`
-	ContentDate time.Time  `json:"content_date"`
 	PublishedAt *time.Time `json:"published_at"`
 }
 
-func (q *Queries) UpsertPost(ctx context.Context, arg UpsertPostParams) (Post, error) {
-	row := q.db.QueryRow(ctx, upsertPost,
+func (q *Queries) SetPostPublished(ctx context.Context, arg SetPostPublishedParams) (Post, error) {
+	row := q.db.QueryRow(ctx, setPostPublished, arg.ID, arg.Draft, arg.PublishedAt)
+	var i Post
+	err := row.Scan(
+		&i.ID,
+		&i.Locale,
+		&i.Slug,
+		&i.Title,
+		&i.Description,
+		&i.Body,
+		&i.Tags,
+		&i.Cover,
+		&i.Featured,
+		&i.Draft,
+		&i.ContentDate,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TranslationKey,
+	)
+	return i, err
+}
+
+const updatePost = `-- name: UpdatePost :one
+UPDATE posts
+SET locale = $2,
+    slug = $3,
+    title = $4,
+    description = $5,
+    body = $6,
+    tags = $7,
+    cover = $8,
+    featured = $9,
+    draft = $10,
+    content_date = $11,
+    published_at = $12,
+    translation_key = $13,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key
+`
+
+type UpdatePostParams struct {
+	ID             uuid.UUID  `json:"id"`
+	Locale         string     `json:"locale"`
+	Slug           string     `json:"slug"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	Body           string     `json:"body"`
+	Tags           []string   `json:"tags"`
+	Cover          string     `json:"cover"`
+	Featured       bool       `json:"featured"`
+	Draft          bool       `json:"draft"`
+	ContentDate    time.Time  `json:"content_date"`
+	PublishedAt    *time.Time `json:"published_at"`
+	TranslationKey string     `json:"translation_key"`
+}
+
+func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) (Post, error) {
+	row := q.db.QueryRow(ctx, updatePost,
+		arg.ID,
 		arg.Locale,
 		arg.Slug,
 		arg.Title,
@@ -379,6 +354,7 @@ func (q *Queries) UpsertPost(ctx context.Context, arg UpsertPostParams) (Post, e
 		arg.Draft,
 		arg.ContentDate,
 		arg.PublishedAt,
+		arg.TranslationKey,
 	)
 	var i Post
 	err := row.Scan(
@@ -396,6 +372,80 @@ func (q *Queries) UpsertPost(ctx context.Context, arg UpsertPostParams) (Post, e
 		&i.PublishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TranslationKey,
+	)
+	return i, err
+}
+
+const upsertPost = `-- name: UpsertPost :one
+INSERT INTO posts (
+    locale, slug, title, description, body, tags, cover,
+    featured, draft, content_date, published_at, translation_key
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+)
+ON CONFLICT (locale, slug) DO UPDATE SET
+    title = EXCLUDED.title,
+    description = EXCLUDED.description,
+    body = EXCLUDED.body,
+    tags = EXCLUDED.tags,
+    cover = EXCLUDED.cover,
+    featured = EXCLUDED.featured,
+    draft = EXCLUDED.draft,
+    content_date = EXCLUDED.content_date,
+    published_at = EXCLUDED.published_at,
+    translation_key = EXCLUDED.translation_key,
+    updated_at = now()
+RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key
+`
+
+type UpsertPostParams struct {
+	Locale         string     `json:"locale"`
+	Slug           string     `json:"slug"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	Body           string     `json:"body"`
+	Tags           []string   `json:"tags"`
+	Cover          string     `json:"cover"`
+	Featured       bool       `json:"featured"`
+	Draft          bool       `json:"draft"`
+	ContentDate    time.Time  `json:"content_date"`
+	PublishedAt    *time.Time `json:"published_at"`
+	TranslationKey string     `json:"translation_key"`
+}
+
+func (q *Queries) UpsertPost(ctx context.Context, arg UpsertPostParams) (Post, error) {
+	row := q.db.QueryRow(ctx, upsertPost,
+		arg.Locale,
+		arg.Slug,
+		arg.Title,
+		arg.Description,
+		arg.Body,
+		arg.Tags,
+		arg.Cover,
+		arg.Featured,
+		arg.Draft,
+		arg.ContentDate,
+		arg.PublishedAt,
+		arg.TranslationKey,
+	)
+	var i Post
+	err := row.Scan(
+		&i.ID,
+		&i.Locale,
+		&i.Slug,
+		&i.Title,
+		&i.Description,
+		&i.Body,
+		&i.Tags,
+		&i.Cover,
+		&i.Featured,
+		&i.Draft,
+		&i.ContentDate,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TranslationKey,
 	)
 	return i, err
 }

@@ -30,7 +30,11 @@ type Querier interface {
 	ListInvitations(ctx context.Context, arg ListInvitationsParams) ([]Invitation, error)
 	ListPosts(ctx context.Context, arg ListPostsParams) ([]Post, error)
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
+	// Every published row sharing this translation key, in any locale. The public
+	// site turns these into hreflang alternates.
+	ListPublishedPostSiblings(ctx context.Context, translationKey string) ([]ListPublishedPostSiblingsRow, error)
 	ListPublishedPosts(ctx context.Context, locale *string) ([]Post, error)
+	ListPublishedProjectSiblings(ctx context.Context, translationKey string) ([]ListPublishedProjectSiblingsRow, error)
 	ListPublishedProjects(ctx context.Context, locale *string) ([]Project, error)
 	SetPostPublished(ctx context.Context, arg SetPostPublishedParams) (Post, error)
 	UpdatePost(ctx context.Context, arg UpdatePostParams) (Post, error)

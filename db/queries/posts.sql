@@ -10,9 +10,9 @@ SELECT * FROM posts WHERE id = $1;
 -- name: CreatePost :one
 INSERT INTO posts (
     locale, slug, title, description, body, tags, cover,
-    featured, draft, content_date, published_at
+    featured, draft, content_date, published_at, translation_key
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 RETURNING *;
 
@@ -29,6 +29,7 @@ SET locale = $2,
     draft = $10,
     content_date = $11,
     published_at = $12,
+    translation_key = $13,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -57,9 +58,9 @@ WHERE draft = false AND locale = $1 AND slug = $2;
 -- name: UpsertPost :one
 INSERT INTO posts (
     locale, slug, title, description, body, tags, cover,
-    featured, draft, content_date, published_at
+    featured, draft, content_date, published_at, translation_key
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (locale, slug) DO UPDATE SET
     title = EXCLUDED.title,
@@ -71,5 +72,14 @@ ON CONFLICT (locale, slug) DO UPDATE SET
     draft = EXCLUDED.draft,
     content_date = EXCLUDED.content_date,
     published_at = EXCLUDED.published_at,
+    translation_key = EXCLUDED.translation_key,
     updated_at = now()
 RETURNING *;
+
+-- name: ListPublishedPostSiblings :many
+-- Every published row sharing this translation key, in any locale. The public
+-- site turns these into hreflang alternates.
+SELECT locale, slug FROM posts
+WHERE draft = false
+  AND translation_key <> ''
+  AND translation_key = $1;

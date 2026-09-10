@@ -76,6 +76,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		Featured:    in.Featured,
 		Draft:       in.Draft,
 		ContentDate: parseContentDate(in.Date),
+		TranslationKey: in.TranslationKey,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -129,6 +130,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		Featured:    in.Featured,
 		Draft:       in.Draft,
 		ContentDate: parseContentDate(in.Date),
+		TranslationKey: in.TranslationKey,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {

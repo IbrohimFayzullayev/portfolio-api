@@ -1,0 +1,9 @@
+-- The API writes this table with raw SQL (internal/api/notify.go) and the bot
+-- reads it with raw SQL (internal/bot/outbox.go), so there is nothing for sqlc
+-- to generate here. This file documents the shape of those two queries.
+--
+--   INSERT INTO notifications (kind, payload) VALUES ($1, $2);
+--
+--   SELECT id, kind, payload FROM notifications
+--   WHERE sent_at IS NULL AND attempts < 5
+--   ORDER BY created_at LIMIT 20;

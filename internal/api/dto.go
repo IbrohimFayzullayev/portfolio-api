@@ -62,6 +62,9 @@ type postInput struct {
 	Featured    bool     `json:"featured"`
 	Draft       bool     `json:"draft"`
 	Date        string   `json:"date"`
+	// Links this row to its counterpart in the other locale. Empty means the
+	// content exists in one language only.
+	TranslationKey string `json:"translation_key"`
 }
 
 func (in *postInput) validate() error {
@@ -79,6 +82,9 @@ func (in *postInput) validate() error {
 			return fmt.Errorf("date must be in YYYY-MM-DD format")
 		}
 	}
+	if in.TranslationKey != "" && !slugRe.MatchString(in.TranslationKey) {
+		return fmt.Errorf("translation_key must be lowercase letters, numbers and hyphens")
+	}
 	return nil
 }
 
@@ -94,6 +100,7 @@ type postResponse struct {
 	Featured    bool       `json:"featured"`
 	Draft       bool       `json:"draft"`
 	Date        string     `json:"date"`
+	TranslationKey string  `json:"translation_key"`
 	PublishedAt *time.Time `json:"published_at"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -111,7 +118,8 @@ func toPostResponse(p db.Post) postResponse {
 		Cover:       p.Cover,
 		Featured:    p.Featured,
 		Draft:       p.Draft,
-		Date:        p.ContentDate.Format(dateLayout),
+		Date:           p.ContentDate.Format(dateLayout),
+		TranslationKey: p.TranslationKey,
 		PublishedAt: p.PublishedAt,
 		CreatedAt:   p.CreatedAt,
 		UpdatedAt:   p.UpdatedAt,
@@ -142,6 +150,8 @@ type projectInput struct {
 	Featured    bool     `json:"featured"`
 	Draft       bool     `json:"draft"`
 	Date        string   `json:"date"`
+	// See postInput.TranslationKey.
+	TranslationKey string `json:"translation_key"`
 }
 
 func (in *projectInput) validate() error {
@@ -158,6 +168,9 @@ func (in *projectInput) validate() error {
 		if _, err := time.Parse(dateLayout, in.Date); err != nil {
 			return fmt.Errorf("date must be in YYYY-MM-DD format")
 		}
+	}
+	if in.TranslationKey != "" && !slugRe.MatchString(in.TranslationKey) {
+		return fmt.Errorf("translation_key must be lowercase letters, numbers and hyphens")
 	}
 	return nil
 }
@@ -177,6 +190,7 @@ type projectResponse struct {
 	Featured    bool      `json:"featured"`
 	Draft       bool      `json:"draft"`
 	Date        string    `json:"date"`
+	TranslationKey string `json:"translation_key"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -195,8 +209,9 @@ func toProjectResponse(p db.Project) projectResponse {
 		Repo:        p.Repo,
 		Order:       p.SortOrder,
 		Featured:    p.Featured,
-		Draft:       p.Draft,
-		Date:        p.ContentDate.Format(dateLayout),
+		Draft:          p.Draft,
+		Date:           p.ContentDate.Format(dateLayout),
+		TranslationKey: p.TranslationKey,
 		CreatedAt:   p.CreatedAt,
 		UpdatedAt:   p.UpdatedAt,
 	}

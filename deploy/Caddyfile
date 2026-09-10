@@ -19,3 +19,10 @@
 	encode gzip zstd
 	reverse_proxy dashboard:3001
 }
+
+# Analytics (Umami). Same certificate machinery as the rest; the dashboard
+# behind it is password-protected by Umami itself.
+{$STATS_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy umami:3000
+}

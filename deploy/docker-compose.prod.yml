@@ -5,6 +5,7 @@
 #   web       — public Next.js site
 #   dashboard — admin Next.js CMS
 #   caddy     — reverse proxy + automatic HTTPS (Let's Encrypt)
+#   umami     — self-hosted web analytics (own database on the same Postgres)
 #
 # Variable values come from the sibling `.env` file (see .env.prod.example).
 # Deploy from /opt/portfolio on the server:
@@ -76,10 +77,38 @@ services:
     depends_on: [api]
     networks: [internal]
 
+  # Self-hosted analytics. Shares the Postgres container but uses its own
+  # database (UMAMI_DB), so a dump of `portfolio` stays free of pageview data.
+  # The `umami` database is NOT created by the Postgres entrypoint on an
+  # existing volume — create it once by hand:
+  #   docker compose -f docker-compose.prod.yml exec -T db \
+  #     psql -U $POSTGRES_USER -c "CREATE DATABASE umami OWNER $POSTGRES_USER;"
+  umami:
+    # Upstream's own compose uses :latest. Pin to the digest you actually ran
+    # (docker image inspect ... --format '{{index .RepoDigests 0}}') once it is
+    # up, so a surprise major version cannot arrive with the next `pull`.
+    image: ghcr.io/umami-software/umami:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${UMAMI_DATABASE_URL}
+      APP_SECRET: ${UMAMI_APP_SECRET}
+      TWO_FACTOR_ENCRYPTION_KEY: ${UMAMI_2FA_KEY}
+      # Umami phones home for release notes otherwise.
+      DISABLE_TELEMETRY: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/heartbeat || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    depends_on: [web, dashboard, api]
+    depends_on: [web, dashboard, api, umami]
     ports:
       - "80:80"
       - "443:443"
@@ -87,6 +116,7 @@ services:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN}
       API_DOMAIN: ${API_DOMAIN}
+      STATS_DOMAIN: ${STATS_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

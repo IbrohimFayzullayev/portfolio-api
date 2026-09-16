@@ -14,7 +14,7 @@ env:
   # Must match the sqlc you run locally (`sqlc version`): two versions can
   # format generated code differently, and the drift check below would then
   # fail for a reason that has nothing to do with the change being pushed.
-  SQLC_VERSION: "1.27.0"
+  SQLC_VERSION: "1.31.1"
 
 jobs:
   test:

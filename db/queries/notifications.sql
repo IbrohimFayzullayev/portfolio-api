@@ -1,9 +1,21 @@
 -- The API writes this table with raw SQL (internal/api/notify.go) and the bot
 -- reads it with raw SQL (internal/bot/outbox.go), so there is nothing for sqlc
--- to generate here. This file documents the shape of those two queries.
+-- to generate here. This file documents the shape of those queries.
 --
---   INSERT INTO notifications (kind, payload) VALUES ($1, $2);
+-- Queue a message. ON CONFLICT DO NOTHING together with the partial unique
+-- index on dedupe_key is the de-duplication: while an identical message is
+-- still pending, a second one is dropped rather than queued behind it.
 --
---   SELECT id, kind, payload FROM notifications
---   WHERE sent_at IS NULL AND attempts < 5
---   ORDER BY created_at LIMIT 20;
+--   INSERT INTO notifications (kind, payload, severity, dedupe_key, deliver_after)
+--   VALUES ($1, $2, $3, $4, $5)
+--   ON CONFLICT DO NOTHING;
+--
+-- Drain what is due. "Due" rather than "pending": a row with deliver_after in
+-- the future is invisible until its moment arrives.
+--
+--   SELECT id, kind, payload, attempts, severity FROM notifications
+--   WHERE sent_at IS NULL
+--     AND attempts < 5
+--     AND (deliver_after IS NULL OR deliver_after <= now())
+--   ORDER BY COALESCE(deliver_after, created_at)
+--   LIMIT 20;

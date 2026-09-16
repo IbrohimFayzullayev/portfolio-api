@@ -24,6 +24,9 @@ type Server struct {
 
 	// Guards the one public write endpoint (invitation submissions).
 	invLimiter *rateLimiter
+
+	// Sliding window of recent 5xx responses, for the burst alert.
+	errRate *errorRate
 }
 
 func NewServer(cfg *config.Config, pool *pgxpool.Pool) *Server {
@@ -35,6 +38,7 @@ func NewServer(cfg *config.Config, pool *pgxpool.Pool) *Server {
 		// 10 submissions per IP per hour is far above real use and far below
 		// anything worth calling spam.
 		invLimiter: newRateLimiter(10, time.Hour),
+		errRate:    &errorRate{},
 	}
 	s.router = s.routes()
 	return s
@@ -48,7 +52,13 @@ func (s *Server) routes() *chi.Mux {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	// Ours instead of middleware.Recoverer: two recoveries in one chain means
+	// the inner one swallows the panic and the outer one never hears about it,
+	// and the whole point of this one is that Telegram hears about it.
+	r.Use(s.recoverPanic)
+	// Outside the router's own error handling, so it sees the status that was
+	// actually written — including the 500 a panic turns into.
+	r.Use(s.watchErrorRate)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.cfg.CORSOrigins,

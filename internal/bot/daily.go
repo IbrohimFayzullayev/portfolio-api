@@ -9,11 +9,12 @@ import (
 
 // The daily summary.
 //
-// One message a morning, from the database only. Umami's numbers belong here
-// too, but they are deliberately absent until Umami is actually running and its
-// API shape has been seen — a summary that silently reports zeros because a
-// guessed endpoint returned nothing is worse than a summary that does not
-// mention traffic at all.
+// One message a morning. The database numbers are the backbone — they cannot
+// fail for an interesting reason — and Umami's are added when Umami answers.
+// The original rule still holds and is enforced in umami.go: if traffic cannot
+// be read, the section is left out rather than printed as zeros. A summary that
+// says "0 views" because an endpoint moved looks like a bad day, and you act on
+// it.
 
 // 09:00 Asia/Tashkent. The zone database is embedded in the image (cmd/bot
 // imports time/tzdata), so this is correct without tzdata installed in alpine.
@@ -91,6 +92,45 @@ func (b *Bot) dailySummary(ctx context.Context) string {
 		WHERE sent_at IS NULL`).Scan(&pending); err == nil && pending > 0 {
 		sb.WriteString(fmt.Sprintf("⚠️ Yuborilmagan xabar: %d\n", pending))
 	}
+
+	// Parked rows are worse than pending ones: nothing will retry them, and
+	// without a line here they are invisible until someone reads the table.
+	var parked int64
+	if err := b.pool.QueryRow(ctx, `
+		SELECT count(*) FROM notifications
+		WHERE sent_at IS NULL AND attempts >= $1`, maxAttempts).Scan(&parked); err == nil && parked > 0 {
+		sb.WriteString(fmt.Sprintf("🚫 Yuborilmaydigan xabar: %d\n", parked))
+	}
+
+	// Yesterday's errors, grouped. The count is groups, not occurrences: ten
+	// thousand repeats of one broken query are one thing to fix.
+	var errorGroups, errorEvents int64
+	if err := b.pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(sum(count), 0) FROM error_groups
+		WHERE last_seen > now() - interval '24 hours'
+		  AND (muted_until IS NULL OR muted_until < now())`,
+	).Scan(&errorGroups, &errorEvents); err == nil && errorGroups > 0 {
+		sb.WriteString(fmt.Sprintf("🔥 Xato: %d guruh · %d marta — /xatolar\n",
+			errorGroups, errorEvents))
+	}
+
+	// Anything queued to go out today, so the morning shows what the day
+	// already has in it.
+	var scheduled int64
+	if err := b.pool.QueryRow(ctx, `
+		SELECT count(*) FROM notifications
+		WHERE sent_at IS NULL AND deliver_after IS NOT NULL
+		  AND deliver_after < date_trunc('day', now()) + interval '1 day'`).Scan(&scheduled); err == nil && scheduled > 0 {
+		sb.WriteString(fmt.Sprintf("⏰ Bugunga rejalashtirilgan: %d\n", scheduled))
+	}
+
+	// Traffic last, and only if Umami answers.
+	now := time.Now().In(tashkent)
+	sb.WriteString(b.trafficSection(ctx, period{
+		label: "kun",
+		from:  now.AddDate(0, 0, -1),
+		to:    now,
+	}))
 
 	return sb.String()
 }

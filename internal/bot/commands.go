@@ -92,8 +92,56 @@ func (b *Bot) statusReport(ctx context.Context) string {
 			"Caddy, DNS yoki sertifikatni tekshiring.</i>")
 	}
 
+	sb.WriteString(b.uptimeSection(ctx))
+
 	sb.WriteString(fmt.Sprintf("\n\n<i>%s</i>", time.Now().In(tashkent).Format("02.01.2006 15:04")))
 	return sb.String()
+}
+
+// uptimeSection answers the question /status could never answer before: not
+// "is it up now" but "has it been". The watcher used to keep its verdict in
+// memory, so an outage that healed before anyone looked left no trace.
+func (b *Bot) uptimeSection(ctx context.Context) string {
+	rows, err := b.pool.Query(ctx, `
+		SELECT target,
+		       count(*)                        AS total,
+		       count(*) FILTER (WHERE ok)      AS good,
+		       max(checked_at) FILTER (WHERE NOT ok) AS last_failure
+		FROM health_checks
+		WHERE checked_at > now() - interval '7 days'
+		GROUP BY target
+		ORDER BY target`)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	for rows.Next() {
+		var (
+			target      string
+			total, good int64
+			lastFailure *time.Time
+		)
+		if err := rows.Scan(&target, &total, &good, &lastFailure); err != nil {
+			return ""
+		}
+		if total == 0 {
+			continue
+		}
+
+		line := fmt.Sprintf("%s — %.1f%%", escapeHTML(target), float64(good)/float64(total)*100)
+		if lastFailure != nil {
+			line += fmt.Sprintf(" · oxirgi uzilish %s",
+				lastFailure.In(tashkent).Format("02.01 15:04"))
+		}
+		sb.WriteString(line + "\n")
+	}
+	if sb.Len() == 0 {
+		return ""
+	}
+
+	return "\n<b>7 kunlik uptime</b>\n" + sb.String()
 }
 
 func (b *Bot) probe(ctx context.Context, label, url string) checkResult {
@@ -173,8 +221,8 @@ func (b *Bot) invitationsReport(ctx context.Context) string {
 	}
 
 	rows, err := b.pool.Query(ctx, `
-		SELECT event_date, event_time, food_emoji, food_label,
-		       place_emoji, place_label, created_at
+		SELECT guest_name, event_date, event_time, food_emoji, food_label,
+		       place_emoji, place_label, venue_name, venue_custom, created_at
 		FROM invitations
 		ORDER BY created_at DESC
 		LIMIT 5`)
@@ -188,17 +236,27 @@ func (b *Bot) invitationsReport(ctx context.Context) string {
 
 	for rows.Next() {
 		var (
+			guestName                       string
 			eventDate                       time.Time
 			eventTime, foodEmoji, foodLabel string
 			placeEmoji, placeLabel          string
+			venueName                       string
+			venueCustom                     bool
 			createdAt                       time.Time
 		)
-		if err := rows.Scan(&eventDate, &eventTime, &foodEmoji, &foodLabel,
-			&placeEmoji, &placeLabel, &createdAt); err != nil {
+		if err := rows.Scan(&guestName, &eventDate, &eventTime, &foodEmoji, &foodLabel,
+			&placeEmoji, &placeLabel, &venueName, &venueCustom, &createdAt); err != nil {
 			return "❌ Natijani o'qib bo'lmadi: " + escapeHTML(shortError(err))
 		}
 
-		sb.WriteString(fmt.Sprintf("\n<b>%s</b>\n", createdAt.In(tashkent).Format("02.01 15:04")))
+		// The name leads when there is one — it is the first thing you want to
+		// know about an invitation, and the rows from before the field existed
+		// simply do not have it.
+		heading := createdAt.In(tashkent).Format("02.01 15:04")
+		if guestName != "" {
+			heading = escapeHTML(guestName) + " · " + heading
+		}
+		sb.WriteString(fmt.Sprintf("\n<b>%s</b>\n", heading))
 		sb.WriteString(fmt.Sprintf("📅 %s · %s\n",
 			eventDate.Format("2006-01-02"), escapeHTML(eventTime)))
 		if foodLabel != "" {
@@ -207,6 +265,10 @@ func (b *Bot) invitationsReport(ctx context.Context) string {
 		if placeLabel != "" {
 			sb.WriteString(fmt.Sprintf("%s %s\n", placeEmoji, escapeHTML(placeLabel)))
 		}
+		sb.WriteString(venueLine(map[string]any{
+			"venue_name":   venueName,
+			"venue_custom": venueCustom,
+		}))
 	}
 	if err := rows.Err(); err != nil {
 		return "❌ O'qishda xato: " + escapeHTML(shortError(err))

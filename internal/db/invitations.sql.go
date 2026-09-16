@@ -25,35 +25,41 @@ func (q *Queries) CountInvitations(ctx context.Context) (int64, error) {
 
 const createInvitation = `-- name: CreateInvitation :one
 INSERT INTO invitations (
-    source, session_id, event_date, event_time,
+    source, session_id, guest_name, event_date, event_time,
     food_id, food_label, food_emoji,
     place_id, place_label, place_emoji,
+    venue_id, venue_name, venue_custom,
     invite_text, user_agent
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 )
-RETURNING id, source, session_id, event_date, event_time, food_id, food_label, food_emoji, place_id, place_label, place_emoji, invite_text, user_agent, created_at
+RETURNING id, source, session_id, event_date, event_time, food_id, food_label, food_emoji, place_id, place_label, place_emoji, invite_text, user_agent, created_at, guest_name, venue_id, venue_name, venue_custom
 `
 
 type CreateInvitationParams struct {
-	Source     string    `json:"source"`
-	SessionID  string    `json:"session_id"`
-	EventDate  time.Time `json:"event_date"`
-	EventTime  string    `json:"event_time"`
-	FoodID     string    `json:"food_id"`
-	FoodLabel  string    `json:"food_label"`
-	FoodEmoji  string    `json:"food_emoji"`
-	PlaceID    string    `json:"place_id"`
-	PlaceLabel string    `json:"place_label"`
-	PlaceEmoji string    `json:"place_emoji"`
-	InviteText string    `json:"invite_text"`
-	UserAgent  string    `json:"user_agent"`
+	Source      string    `json:"source"`
+	SessionID   string    `json:"session_id"`
+	GuestName   string    `json:"guest_name"`
+	EventDate   time.Time `json:"event_date"`
+	EventTime   string    `json:"event_time"`
+	FoodID      string    `json:"food_id"`
+	FoodLabel   string    `json:"food_label"`
+	FoodEmoji   string    `json:"food_emoji"`
+	PlaceID     string    `json:"place_id"`
+	PlaceLabel  string    `json:"place_label"`
+	PlaceEmoji  string    `json:"place_emoji"`
+	VenueID     string    `json:"venue_id"`
+	VenueName   string    `json:"venue_name"`
+	VenueCustom bool      `json:"venue_custom"`
+	InviteText  string    `json:"invite_text"`
+	UserAgent   string    `json:"user_agent"`
 }
 
 func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error) {
 	row := q.db.QueryRow(ctx, createInvitation,
 		arg.Source,
 		arg.SessionID,
+		arg.GuestName,
 		arg.EventDate,
 		arg.EventTime,
 		arg.FoodID,
@@ -62,6 +68,9 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		arg.PlaceID,
 		arg.PlaceLabel,
 		arg.PlaceEmoji,
+		arg.VenueID,
+		arg.VenueName,
+		arg.VenueCustom,
 		arg.InviteText,
 		arg.UserAgent,
 	)
@@ -81,6 +90,10 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		&i.InviteText,
 		&i.UserAgent,
 		&i.CreatedAt,
+		&i.GuestName,
+		&i.VenueID,
+		&i.VenueName,
+		&i.VenueCustom,
 	)
 	return i, err
 }
@@ -95,7 +108,7 @@ func (q *Queries) DeleteInvitation(ctx context.Context, id uuid.UUID) error {
 }
 
 const getInvitationByID = `-- name: GetInvitationByID :one
-SELECT id, source, session_id, event_date, event_time, food_id, food_label, food_emoji, place_id, place_label, place_emoji, invite_text, user_agent, created_at FROM invitations WHERE id = $1
+SELECT id, source, session_id, event_date, event_time, food_id, food_label, food_emoji, place_id, place_label, place_emoji, invite_text, user_agent, created_at, guest_name, venue_id, venue_name, venue_custom FROM invitations WHERE id = $1
 `
 
 func (q *Queries) GetInvitationByID(ctx context.Context, id uuid.UUID) (Invitation, error) {
@@ -116,12 +129,16 @@ func (q *Queries) GetInvitationByID(ctx context.Context, id uuid.UUID) (Invitati
 		&i.InviteText,
 		&i.UserAgent,
 		&i.CreatedAt,
+		&i.GuestName,
+		&i.VenueID,
+		&i.VenueName,
+		&i.VenueCustom,
 	)
 	return i, err
 }
 
 const listInvitations = `-- name: ListInvitations :many
-SELECT id, source, session_id, event_date, event_time, food_id, food_label, food_emoji, place_id, place_label, place_emoji, invite_text, user_agent, created_at FROM invitations
+SELECT id, source, session_id, event_date, event_time, food_id, food_label, food_emoji, place_id, place_label, place_emoji, invite_text, user_agent, created_at, guest_name, venue_id, venue_name, venue_custom FROM invitations
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -155,6 +172,10 @@ func (q *Queries) ListInvitations(ctx context.Context, arg ListInvitationsParams
 			&i.InviteText,
 			&i.UserAgent,
 			&i.CreatedAt,
+			&i.GuestName,
+			&i.VenueID,
+			&i.VenueName,
+			&i.VenueCustom,
 		); err != nil {
 			return nil, err
 		}

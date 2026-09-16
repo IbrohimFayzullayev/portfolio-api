@@ -14,9 +14,9 @@ import (
 const dateLayout = "2006-01-02"
 
 var (
-	slugRe   = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-	locales  = map[string]bool{"en": true, "uz": true}
-	emailRe  = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+	slugRe  = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	locales = map[string]bool{"en": true, "uz": true}
+	emailRe = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 )
 
 /* ------------------------------- auth DTOs ------------------------------- */
@@ -89,40 +89,40 @@ func (in *postInput) validate() error {
 }
 
 type postResponse struct {
-	ID          uuid.UUID  `json:"id"`
-	Locale      string     `json:"locale"`
-	Slug        string     `json:"slug"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Body        string     `json:"body"`
-	Tags        []string   `json:"tags"`
-	Cover       string     `json:"cover"`
-	Featured    bool       `json:"featured"`
-	Draft       bool       `json:"draft"`
-	Date        string     `json:"date"`
-	TranslationKey string  `json:"translation_key"`
-	PublishedAt *time.Time `json:"published_at"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID             uuid.UUID  `json:"id"`
+	Locale         string     `json:"locale"`
+	Slug           string     `json:"slug"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	Body           string     `json:"body"`
+	Tags           []string   `json:"tags"`
+	Cover          string     `json:"cover"`
+	Featured       bool       `json:"featured"`
+	Draft          bool       `json:"draft"`
+	Date           string     `json:"date"`
+	TranslationKey string     `json:"translation_key"`
+	PublishedAt    *time.Time `json:"published_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 func toPostResponse(p db.Post) postResponse {
 	return postResponse{
-		ID:          p.ID,
-		Locale:      p.Locale,
-		Slug:        p.Slug,
-		Title:       p.Title,
-		Description: p.Description,
-		Body:        p.Body,
-		Tags:        p.Tags,
-		Cover:       p.Cover,
-		Featured:    p.Featured,
-		Draft:       p.Draft,
+		ID:             p.ID,
+		Locale:         p.Locale,
+		Slug:           p.Slug,
+		Title:          p.Title,
+		Description:    p.Description,
+		Body:           p.Body,
+		Tags:           p.Tags,
+		Cover:          p.Cover,
+		Featured:       p.Featured,
+		Draft:          p.Draft,
 		Date:           p.ContentDate.Format(dateLayout),
 		TranslationKey: p.TranslationKey,
-		PublishedAt: p.PublishedAt,
-		CreatedAt:   p.CreatedAt,
-		UpdatedAt:   p.UpdatedAt,
+		PublishedAt:    p.PublishedAt,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
 	}
 }
 
@@ -176,44 +176,44 @@ func (in *projectInput) validate() error {
 }
 
 type projectResponse struct {
-	ID          uuid.UUID `json:"id"`
-	Locale      string    `json:"locale"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Body        string    `json:"body"`
-	Tags        []string  `json:"tags"`
-	Stack       []string  `json:"stack"`
-	URL         string    `json:"url"`
-	Repo        string    `json:"repo"`
-	Order       int32     `json:"order"`
-	Featured    bool      `json:"featured"`
-	Draft       bool      `json:"draft"`
-	Date        string    `json:"date"`
-	TranslationKey string `json:"translation_key"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	Locale         string    `json:"locale"`
+	Slug           string    `json:"slug"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	Body           string    `json:"body"`
+	Tags           []string  `json:"tags"`
+	Stack          []string  `json:"stack"`
+	URL            string    `json:"url"`
+	Repo           string    `json:"repo"`
+	Order          int32     `json:"order"`
+	Featured       bool      `json:"featured"`
+	Draft          bool      `json:"draft"`
+	Date           string    `json:"date"`
+	TranslationKey string    `json:"translation_key"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func toProjectResponse(p db.Project) projectResponse {
 	return projectResponse{
-		ID:          p.ID,
-		Locale:      p.Locale,
-		Slug:        p.Slug,
-		Title:       p.Title,
-		Description: p.Description,
-		Body:        p.Body,
-		Tags:        p.Tags,
-		Stack:       p.Stack,
-		URL:         p.Url,
-		Repo:        p.Repo,
-		Order:       p.SortOrder,
-		Featured:    p.Featured,
+		ID:             p.ID,
+		Locale:         p.Locale,
+		Slug:           p.Slug,
+		Title:          p.Title,
+		Description:    p.Description,
+		Body:           p.Body,
+		Tags:           p.Tags,
+		Stack:          p.Stack,
+		URL:            p.Url,
+		Repo:           p.Repo,
+		Order:          p.SortOrder,
+		Featured:       p.Featured,
 		Draft:          p.Draft,
 		Date:           p.ContentDate.Format(dateLayout),
 		TranslationKey: p.TranslationKey,
-		CreatedAt:   p.CreatedAt,
-		UpdatedAt:   p.UpdatedAt,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
 	}
 }
 
@@ -228,8 +228,12 @@ func toProjectResponses(items []db.Project) []projectResponse {
 /* ---------------------------- invitation DTOs ---------------------------- */
 
 type invitationInput struct {
-	Source     string `json:"source"`
-	SessionID  string `json:"session_id"`
+	Source    string `json:"source"`
+	SessionID string `json:"session_id"`
+	// Collected by the invitation site from the visitor. Optional: rows
+	// written before the field existed have none, and the site may still send
+	// nothing.
+	GuestName  string `json:"guest_name"`
 	Date       string `json:"date"`
 	Time       string `json:"time"`
 	FoodID     string `json:"food_id"`
@@ -238,7 +242,12 @@ type invitationInput struct {
 	PlaceID    string `json:"place_id"`
 	PlaceLabel string `json:"place_label"`
 	PlaceEmoji string `json:"place_emoji"`
-	InviteText string `json:"invite_text"`
+	// The exact venue, as opposed to the kind of place above. VenueCustom is
+	// true when the visitor typed the name instead of choosing from the list.
+	VenueID     string `json:"venue_id"`
+	VenueName   string `json:"venue_name"`
+	VenueCustom bool   `json:"venue_custom"`
+	InviteText  string `json:"invite_text"`
 }
 
 func (in *invitationInput) validate() error {
@@ -255,20 +264,24 @@ func (in *invitationInput) validate() error {
 }
 
 type invitationResponse struct {
-	ID         uuid.UUID `json:"id"`
-	Source     string    `json:"source"`
-	SessionID  string    `json:"session_id"`
-	Date       string    `json:"date"`
-	Time       string    `json:"time"`
-	FoodID     string    `json:"food_id"`
-	FoodLabel  string    `json:"food_label"`
-	FoodEmoji  string    `json:"food_emoji"`
-	PlaceID    string    `json:"place_id"`
-	PlaceLabel string    `json:"place_label"`
-	PlaceEmoji string    `json:"place_emoji"`
-	InviteText string    `json:"invite_text"`
-	UserAgent  string    `json:"user_agent"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	Source      string    `json:"source"`
+	SessionID   string    `json:"session_id"`
+	GuestName   string    `json:"guest_name"`
+	Date        string    `json:"date"`
+	Time        string    `json:"time"`
+	FoodID      string    `json:"food_id"`
+	FoodLabel   string    `json:"food_label"`
+	FoodEmoji   string    `json:"food_emoji"`
+	PlaceID     string    `json:"place_id"`
+	PlaceLabel  string    `json:"place_label"`
+	PlaceEmoji  string    `json:"place_emoji"`
+	VenueID     string    `json:"venue_id"`
+	VenueName   string    `json:"venue_name"`
+	VenueCustom bool      `json:"venue_custom"`
+	InviteText  string    `json:"invite_text"`
+	UserAgent   string    `json:"user_agent"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type invitationListResponse struct {
@@ -278,20 +291,24 @@ type invitationListResponse struct {
 
 func toInvitationResponse(v db.Invitation) invitationResponse {
 	return invitationResponse{
-		ID:         v.ID,
-		Source:     v.Source,
-		SessionID:  v.SessionID,
-		Date:       v.EventDate.Format(dateLayout),
-		Time:       v.EventTime,
-		FoodID:     v.FoodID,
-		FoodLabel:  v.FoodLabel,
-		FoodEmoji:  v.FoodEmoji,
-		PlaceID:    v.PlaceID,
-		PlaceLabel: v.PlaceLabel,
-		PlaceEmoji: v.PlaceEmoji,
-		InviteText: v.InviteText,
-		UserAgent:  v.UserAgent,
-		CreatedAt:  v.CreatedAt,
+		ID:          v.ID,
+		Source:      v.Source,
+		SessionID:   v.SessionID,
+		GuestName:   v.GuestName,
+		Date:        v.EventDate.Format(dateLayout),
+		Time:        v.EventTime,
+		FoodID:      v.FoodID,
+		FoodLabel:   v.FoodLabel,
+		FoodEmoji:   v.FoodEmoji,
+		PlaceID:     v.PlaceID,
+		PlaceLabel:  v.PlaceLabel,
+		PlaceEmoji:  v.PlaceEmoji,
+		VenueID:     v.VenueID,
+		VenueName:   v.VenueName,
+		VenueCustom: v.VenueCustom,
+		InviteText:  v.InviteText,
+		UserAgent:   v.UserAgent,
+		CreatedAt:   v.CreatedAt,
 	}
 }
 

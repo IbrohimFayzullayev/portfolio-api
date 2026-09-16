@@ -21,12 +21,16 @@ const telegramAPI = "https://api.telegram.org"
 
 type telegramClient struct {
 	token string
-	http  *http.Client
+	// Separate from the constant so tests can point the client at an
+	// httptest server; nothing else ever sets it.
+	baseURL string
+	http    *http.Client
 }
 
 func newTelegramClient(token string) *telegramClient {
 	return &telegramClient{
-		token: token,
+		token:   token,
+		baseURL: telegramAPI,
 		// Longer than the getUpdates long-poll timeout so the poll, not the
 		// transport, decides when a request ends.
 		http: &http.Client{Timeout: 70 * time.Second},
@@ -69,6 +73,23 @@ type Message struct {
 	Chat      *Chat  `json:"chat"`
 	Text      string `json:"text"`
 	Date      int64  `json:"date"`
+
+	// Set when this message answers one the bot sent with force_reply. It is
+	// the whole conversation state: which question is being answered is a
+	// property of the message, not of a map in this process.
+	ReplyToMessage *Message `json:"reply_to_message"`
+
+	// A .md file sent instead of typing a post into a chat box.
+	Document *Document `json:"document"`
+	// Text sent with the file, if any.
+	Caption string `json:"caption"`
+}
+
+type Document struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
 }
 
 type User struct {
@@ -85,6 +106,38 @@ type apiResponse struct {
 	OK          bool            `json:"ok"`
 	Result      json.RawMessage `json:"result"`
 	Description string          `json:"description"`
+	ErrorCode   int             `json:"error_code"`
+	// Telegram answers a rate limit with the exact number of seconds to wait.
+	// Guessing instead of reading it is how a bot earns a longer ban.
+	Parameters *struct {
+		RetryAfter int `json:"retry_after"`
+	} `json:"parameters"`
+}
+
+// telegramError is a rejection from Telegram itself, carrying enough detail
+// for the outbox to decide what to do about it. The distinction is the whole
+// point: 429 is an instruction to wait, 5xx is worth retrying, and 400 will
+// fail identically forever no matter how many times it is sent.
+type telegramError struct {
+	Method      string
+	Code        int
+	Description string
+	RetryAfter  time.Duration
+}
+
+func (e *telegramError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("%s: telegram %d: %s (retry after %s)",
+			e.Method, e.Code, e.Description, e.RetryAfter)
+	}
+	return fmt.Sprintf("%s: telegram %d: %s", e.Method, e.Code, e.Description)
+}
+
+// permanent reports whether resending the same message could ever succeed.
+// 4xx means the request itself is wrong — bad HTML, a chat that blocked the
+// bot, a message that no longer exists — and 429 is explicitly not that.
+func (e *telegramError) permanent() bool {
+	return e.Code >= 400 && e.Code < 500 && e.Code != 429
 }
 
 /* -------------------------------- calls ---------------------------------- */
@@ -99,7 +152,7 @@ func (c *telegramClient) call(ctx context.Context, method string, body any, out 
 		reader = bytes.NewReader(raw)
 	}
 
-	endpoint := fmt.Sprintf("%s/bot%s/%s", telegramAPI, c.token, method)
+	endpoint := fmt.Sprintf("%s/bot%s/%s", c.baseURL, c.token, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, reader)
 	if err != nil {
 		return err
@@ -119,7 +172,20 @@ func (c *telegramClient) call(ctx context.Context, method string, body any, out 
 		return fmt.Errorf("%s: decode response: %w", method, err)
 	}
 	if !parsed.OK {
-		return fmt.Errorf("%s: telegram error: %s", method, parsed.Description)
+		te := &telegramError{
+			Method:      method,
+			Code:        parsed.ErrorCode,
+			Description: parsed.Description,
+		}
+		if te.Code == 0 {
+			// Some failures never reach the JSON envelope (a proxy, a gateway
+			// error page). The HTTP status is then the only signal there is.
+			te.Code = res.StatusCode
+		}
+		if parsed.Parameters != nil && parsed.Parameters.RetryAfter > 0 {
+			te.RetryAfter = time.Duration(parsed.Parameters.RetryAfter) * time.Second
+		}
+		return te
 	}
 	if out != nil {
 		return json.Unmarshal(parsed.Result, out)
@@ -179,6 +245,69 @@ func (c *telegramClient) editMessageText(
 	return c.call(ctx, "editMessageText", body, nil)
 }
 
+// forceReply makes the Telegram client open the keyboard with the message
+// quoted, so the answer comes back carrying reply_to_message_id.
+type forceReply struct {
+	ForceReply            bool   `json:"force_reply"`
+	InputFieldPlaceholder string `json:"input_field_placeholder,omitempty"`
+}
+
+// sendPrompt asks a question and returns the id of the question, which is what
+// the answer will point back at.
+func (c *telegramClient) sendPrompt(
+	ctx context.Context, chatID int64, text, placeholder string,
+) (int64, error) {
+	var sent Message
+	err := c.call(ctx, "sendMessage", map[string]any{
+		"chat_id":                  chatID,
+		"text":                     text,
+		"parse_mode":               "HTML",
+		"disable_web_page_preview": true,
+		"reply_markup": forceReply{
+			ForceReply:            true,
+			InputFieldPlaceholder: placeholder,
+		},
+	}, &sent)
+	return sent.MessageID, err
+}
+
+// getFile resolves a file id to a path on Telegram's file server. The path is
+// short-lived, so it is fetched at download time rather than stored.
+func (c *telegramClient) getFile(ctx context.Context, fileID string) (string, error) {
+	var f struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := c.call(ctx, "getFile", map[string]any{"file_id": fileID}, &f); err != nil {
+		return "", err
+	}
+	if f.FilePath == "" {
+		return "", fmt.Errorf("getFile: empty path")
+	}
+	return f.FilePath, nil
+}
+
+// downloadFile fetches a file Telegram is holding for us. The limit is a guard,
+// not a policy: a blog post is kilobytes, and anything far larger than that is
+// a mistake worth refusing cheaply.
+func (c *telegramClient) downloadFile(ctx context.Context, path string, limit int64) ([]byte, error) {
+	url := fmt.Sprintf("%s/file/bot%s/%s", c.baseURL, c.token, path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download: HTTP %d", res.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(res.Body, limit))
+}
+
 // answerCallback clears the button's loading spinner. Telegram leaves it
 // spinning for a few seconds otherwise, which reads as a broken bot.
 func (c *telegramClient) answerCallback(ctx context.Context, id, text string) error {
@@ -186,6 +315,19 @@ func (c *telegramClient) answerCallback(ctx context.Context, id, text string) er
 		"callback_query_id": id,
 		"text":              text,
 	}, nil)
+}
+
+// botCommand is one entry in Telegram's command menu.
+type botCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+// setMyCommands fills the menu next to the chat's input box. Worth doing once
+// at startup rather than documenting in /help alone: the commands are now
+// numerous enough that remembering their names is a tax.
+func (c *telegramClient) setMyCommands(ctx context.Context, commands []botCommand) error {
+	return c.call(ctx, "setMyCommands", map[string]any{"commands": commands}, nil)
 }
 
 // getMe is used once at startup to prove the token works and to log the bot's

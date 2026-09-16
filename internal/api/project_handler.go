@@ -26,7 +26,7 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 
 	projects, err := s.q.ListProjects(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list projects")
+		s.serverError(w, r, "failed to list projects", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toProjectResponses(projects))
@@ -45,7 +45,7 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "project not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load project")
+		s.serverError(w, r, "failed to load project", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toProjectResponse(project))
@@ -63,19 +63,19 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	project, err := s.q.CreateProject(r.Context(), db.CreateProjectParams{
-		Locale:      in.Locale,
-		Slug:        in.Slug,
-		Title:       in.Title,
-		Description: in.Description,
-		Body:        in.Body,
-		Tags:        nonNil(in.Tags),
-		Stack:       nonNil(in.Stack),
-		Url:         in.URL,
-		Repo:        in.Repo,
-		SortOrder:   in.Order,
-		Featured:    in.Featured,
-		Draft:       in.Draft,
-		ContentDate: parseContentDate(in.Date),
+		Locale:         in.Locale,
+		Slug:           in.Slug,
+		Title:          in.Title,
+		Description:    in.Description,
+		Body:           in.Body,
+		Tags:           nonNil(in.Tags),
+		Stack:          nonNil(in.Stack),
+		Url:            in.URL,
+		Repo:           in.Repo,
+		SortOrder:      in.Order,
+		Featured:       in.Featured,
+		Draft:          in.Draft,
+		ContentDate:    parseContentDate(in.Date),
 		TranslationKey: in.TranslationKey,
 	})
 	if err != nil {
@@ -83,7 +83,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a project with this locale and slug already exists")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create project")
+		s.serverError(w, r, "failed to create project", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toProjectResponse(project))
@@ -101,7 +101,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "project not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load project")
+		s.serverError(w, r, "failed to load project", err)
 		return
 	}
 
@@ -116,20 +116,20 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	project, err := s.q.UpdateProject(r.Context(), db.UpdateProjectParams{
-		ID:          id,
-		Locale:      in.Locale,
-		Slug:        in.Slug,
-		Title:       in.Title,
-		Description: in.Description,
-		Body:        in.Body,
-		Tags:        nonNil(in.Tags),
-		Stack:       nonNil(in.Stack),
-		Url:         in.URL,
-		Repo:        in.Repo,
-		SortOrder:   in.Order,
-		Featured:    in.Featured,
-		Draft:       in.Draft,
-		ContentDate: parseContentDate(in.Date),
+		ID:             id,
+		Locale:         in.Locale,
+		Slug:           in.Slug,
+		Title:          in.Title,
+		Description:    in.Description,
+		Body:           in.Body,
+		Tags:           nonNil(in.Tags),
+		Stack:          nonNil(in.Stack),
+		Url:            in.URL,
+		Repo:           in.Repo,
+		SortOrder:      in.Order,
+		Featured:       in.Featured,
+		Draft:          in.Draft,
+		ContentDate:    parseContentDate(in.Date),
 		TranslationKey: in.TranslationKey,
 	})
 	if err != nil {
@@ -137,7 +137,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a project with this locale and slug already exists")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to update project")
+		s.serverError(w, r, "failed to update project", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toProjectResponse(project))
@@ -150,7 +150,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.q.DeleteProject(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete project")
+		s.serverError(w, r, "failed to delete project", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

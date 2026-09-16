@@ -10,31 +10,77 @@ import (
 	"github.com/google/uuid"
 )
 
+type BotHeartbeat struct {
+	ID     int16     `json:"id"`
+	BeatAt time.Time `json:"beat_at"`
+	Note   string    `json:"note"`
+}
+
+type BotPrompt struct {
+	ChatID    int64     `json:"chat_id"`
+	MessageID int64     `json:"message_id"`
+	Intent    string    `json:"intent"`
+	TargetID  string    `json:"target_id"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type ErrorGroup struct {
+	Fingerprint   string     `json:"fingerprint"`
+	Service       string     `json:"service"`
+	Route         string     `json:"route"`
+	Severity      int16      `json:"severity"`
+	Message       string     `json:"message"`
+	SampleStack   string     `json:"sample_stack"`
+	Count         int64      `json:"count"`
+	NotifiedCount int64      `json:"notified_count"`
+	FirstSeen     time.Time  `json:"first_seen"`
+	LastSeen      time.Time  `json:"last_seen"`
+	NotifiedAt    *time.Time `json:"notified_at"`
+	MutedUntil    *time.Time `json:"muted_until"`
+}
+
+type HealthCheck struct {
+	ID        int64     `json:"id"`
+	Target    string    `json:"target"`
+	Ok        bool      `json:"ok"`
+	LatencyMs int32     `json:"latency_ms"`
+	Detail    string    `json:"detail"`
+	CheckedAt time.Time `json:"checked_at"`
+}
+
 type Invitation struct {
-	ID         uuid.UUID `json:"id"`
-	Source     string    `json:"source"`
-	SessionID  string    `json:"session_id"`
-	EventDate  time.Time `json:"event_date"`
-	EventTime  string    `json:"event_time"`
-	FoodID     string    `json:"food_id"`
-	FoodLabel  string    `json:"food_label"`
-	FoodEmoji  string    `json:"food_emoji"`
-	PlaceID    string    `json:"place_id"`
-	PlaceLabel string    `json:"place_label"`
-	PlaceEmoji string    `json:"place_emoji"`
-	InviteText string    `json:"invite_text"`
-	UserAgent  string    `json:"user_agent"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	Source      string    `json:"source"`
+	SessionID   string    `json:"session_id"`
+	EventDate   time.Time `json:"event_date"`
+	EventTime   string    `json:"event_time"`
+	FoodID      string    `json:"food_id"`
+	FoodLabel   string    `json:"food_label"`
+	FoodEmoji   string    `json:"food_emoji"`
+	PlaceID     string    `json:"place_id"`
+	PlaceLabel  string    `json:"place_label"`
+	PlaceEmoji  string    `json:"place_emoji"`
+	InviteText  string    `json:"invite_text"`
+	UserAgent   string    `json:"user_agent"`
+	CreatedAt   time.Time `json:"created_at"`
+	GuestName   string    `json:"guest_name"`
+	VenueID     string    `json:"venue_id"`
+	VenueName   string    `json:"venue_name"`
+	VenueCustom bool      `json:"venue_custom"`
 }
 
 type Notification struct {
-	ID        int64      `json:"id"`
-	Kind      string     `json:"kind"`
-	Payload   []byte     `json:"payload"`
-	CreatedAt time.Time  `json:"created_at"`
-	SentAt    *time.Time `json:"sent_at"`
-	Attempts  int32      `json:"attempts"`
-	LastError string     `json:"last_error"`
+	ID           int64      `json:"id"`
+	Kind         string     `json:"kind"`
+	Payload      []byte     `json:"payload"`
+	CreatedAt    time.Time  `json:"created_at"`
+	SentAt       *time.Time `json:"sent_at"`
+	Attempts     int32      `json:"attempts"`
+	LastError    string     `json:"last_error"`
+	DeliverAfter *time.Time `json:"deliver_after"`
+	DedupeKey    *string    `json:"dedupe_key"`
+	Severity     int16      `json:"severity"`
 }
 
 type Post struct {
@@ -53,6 +99,7 @@ type Post struct {
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	TranslationKey string     `json:"translation_key"`
+	PublishAt      *time.Time `json:"publish_at"`
 }
 
 type Project struct {

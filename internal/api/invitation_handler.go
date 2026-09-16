@@ -26,35 +26,48 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 		source = "planner"
 	}
 
+	guestName := clampField(in.GuestName, 120)
+	// Clamped to the column widths, so an over-long value is trimmed here
+	// rather than rejected by PostgreSQL with the whole submission.
+	venueID := clampField(in.VenueID, 64)
+	venueName := clampField(in.VenueName, 80)
+
 	_, err := s.q.CreateInvitation(r.Context(), db.CreateInvitationParams{
-		Source:     source,
-		SessionID:  clampField(in.SessionID, 80),
-		EventDate:  parseContentDate(in.Date),
-		EventTime:  clampField(in.Time, 40),
-		FoodID:     clampField(in.FoodID, 60),
-		FoodLabel:  clampField(in.FoodLabel, 120),
-		FoodEmoji:  clampField(in.FoodEmoji, 16),
-		PlaceID:    clampField(in.PlaceID, 60),
-		PlaceLabel: clampField(in.PlaceLabel, 120),
-		PlaceEmoji: clampField(in.PlaceEmoji, 16),
-		InviteText: clampField(in.InviteText, 4000),
-		UserAgent:  clampField(r.UserAgent(), 400),
+		Source:      source,
+		SessionID:   clampField(in.SessionID, 80),
+		GuestName:   guestName,
+		EventDate:   parseContentDate(in.Date),
+		EventTime:   clampField(in.Time, 40),
+		FoodID:      clampField(in.FoodID, 60),
+		FoodLabel:   clampField(in.FoodLabel, 120),
+		FoodEmoji:   clampField(in.FoodEmoji, 16),
+		PlaceID:     clampField(in.PlaceID, 60),
+		PlaceLabel:  clampField(in.PlaceLabel, 120),
+		PlaceEmoji:  clampField(in.PlaceEmoji, 16),
+		VenueID:     venueID,
+		VenueName:   venueName,
+		VenueCustom: in.VenueCustom,
+		InviteText:  clampField(in.InviteText, 4000),
+		UserAgent:   clampField(r.UserAgent(), 400),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save invitation")
+		s.serverError(w, r, "failed to save invitation", err)
 		return
 	}
 
 	// Queued, not sent: the row is already safe in the database, so the visitor
 	// gets their answer whether or not Telegram is reachable.
 	s.notify("invitation.created", map[string]any{
-		"source":      source,
-		"date":        in.Date,
-		"time":        clampField(in.Time, 40),
-		"food_label":  clampField(in.FoodLabel, 120),
-		"food_emoji":  clampField(in.FoodEmoji, 16),
-		"place_label": clampField(in.PlaceLabel, 120),
-		"place_emoji": clampField(in.PlaceEmoji, 16),
+		"source":       source,
+		"guest_name":   guestName,
+		"date":         in.Date,
+		"time":         clampField(in.Time, 40),
+		"food_label":   clampField(in.FoodLabel, 120),
+		"food_emoji":   clampField(in.FoodEmoji, 16),
+		"place_label":  clampField(in.PlaceLabel, 120),
+		"place_emoji":  clampField(in.PlaceEmoji, 16),
+		"venue_name":   venueName,
+		"venue_custom": in.VenueCustom,
 	})
 
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "received"})
@@ -69,13 +82,13 @@ func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request) {
 		Offset: int32(offset),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list invitations")
+		s.serverError(w, r, "failed to list invitations", err)
 		return
 	}
 
 	total, err := s.q.CountInvitations(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to count invitations")
+		s.serverError(w, r, "failed to count invitations", err)
 		return
 	}
 
@@ -98,7 +111,7 @@ func (s *Server) handleGetInvitation(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "invitation not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load invitation")
+		s.serverError(w, r, "failed to load invitation", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toInvitationResponse(item))
@@ -112,7 +125,7 @@ func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.q.DeleteInvitation(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete invitation")
+		s.serverError(w, r, "failed to delete invitation", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

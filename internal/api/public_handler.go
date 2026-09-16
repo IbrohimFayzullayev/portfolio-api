@@ -23,7 +23,7 @@ func localeParam(r *http.Request) *string {
 func (s *Server) handlePublicListPosts(w http.ResponseWriter, r *http.Request) {
 	posts, err := s.q.ListPublishedPosts(r.Context(), localeParam(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list posts")
+		s.serverError(w, r, "failed to list posts", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toPostResponses(posts))
@@ -39,7 +39,7 @@ func (s *Server) handlePublicGetPost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "post not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load post")
+		s.serverError(w, r, "failed to load post", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toPostResponse(post))
@@ -48,7 +48,7 @@ func (s *Server) handlePublicGetPost(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePublicListProjects(w http.ResponseWriter, r *http.Request) {
 	projects, err := s.q.ListPublishedProjects(r.Context(), localeParam(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list projects")
+		s.serverError(w, r, "failed to list projects", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toProjectResponses(projects))
@@ -64,7 +64,7 @@ func (s *Server) handlePublicGetProject(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusNotFound, "project not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load project")
+		s.serverError(w, r, "failed to load project", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toProjectResponse(project))

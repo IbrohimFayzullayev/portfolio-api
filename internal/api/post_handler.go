@@ -32,7 +32,7 @@ func (s *Server) handleListPosts(w http.ResponseWriter, r *http.Request) {
 
 	posts, err := s.q.ListPosts(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list posts")
+		s.serverError(w, r, "failed to list posts", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toPostResponses(posts))
@@ -51,7 +51,7 @@ func (s *Server) handleGetPost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "post not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load post")
+		s.serverError(w, r, "failed to load post", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toPostResponse(post))
@@ -69,17 +69,17 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	post, err := s.q.CreatePost(r.Context(), db.CreatePostParams{
-		Locale:      in.Locale,
-		Slug:        in.Slug,
-		Title:       in.Title,
-		Description: in.Description,
-		Body:        in.Body,
-		Tags:        nonNil(in.Tags),
-		Cover:       in.Cover,
-		Featured:    in.Featured,
-		Draft:       in.Draft,
-		ContentDate: parseContentDate(in.Date),
-		PublishedAt: publishedAtFor(in.Draft, nil),
+		Locale:         in.Locale,
+		Slug:           in.Slug,
+		Title:          in.Title,
+		Description:    in.Description,
+		Body:           in.Body,
+		Tags:           nonNil(in.Tags),
+		Cover:          in.Cover,
+		Featured:       in.Featured,
+		Draft:          in.Draft,
+		ContentDate:    parseContentDate(in.Date),
+		PublishedAt:    publishedAtFor(in.Draft, nil),
 		TranslationKey: in.TranslationKey,
 	})
 	if err != nil {
@@ -87,7 +87,7 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a post with this locale and slug already exists")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create post")
+		s.serverError(w, r, "failed to create post", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPostResponse(post))
@@ -106,7 +106,7 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "post not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load post")
+		s.serverError(w, r, "failed to load post", err)
 		return
 	}
 
@@ -121,18 +121,18 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	post, err := s.q.UpdatePost(r.Context(), db.UpdatePostParams{
-		ID:          id,
-		Locale:      in.Locale,
-		Slug:        in.Slug,
-		Title:       in.Title,
-		Description: in.Description,
-		Body:        in.Body,
-		Tags:        nonNil(in.Tags),
-		Cover:       in.Cover,
-		Featured:    in.Featured,
-		Draft:       in.Draft,
-		ContentDate: parseContentDate(in.Date),
-		PublishedAt: publishedAtFor(in.Draft, existing.PublishedAt),
+		ID:             id,
+		Locale:         in.Locale,
+		Slug:           in.Slug,
+		Title:          in.Title,
+		Description:    in.Description,
+		Body:           in.Body,
+		Tags:           nonNil(in.Tags),
+		Cover:          in.Cover,
+		Featured:       in.Featured,
+		Draft:          in.Draft,
+		ContentDate:    parseContentDate(in.Date),
+		PublishedAt:    publishedAtFor(in.Draft, existing.PublishedAt),
 		TranslationKey: in.TranslationKey,
 	})
 	if err != nil {
@@ -140,7 +140,7 @@ func (s *Server) handleUpdatePost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a post with this locale and slug already exists")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to update post")
+		s.serverError(w, r, "failed to update post", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toPostResponse(post))
@@ -159,7 +159,7 @@ func (s *Server) handlePublishPost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "post not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load post")
+		s.serverError(w, r, "failed to load post", err)
 		return
 	}
 
@@ -177,7 +177,7 @@ func (s *Server) handlePublishPost(w http.ResponseWriter, r *http.Request) {
 		PublishedAt: publishedAtFor(body.Draft, existing.PublishedAt),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update publish state")
+		s.serverError(w, r, "failed to update publish state", err)
 		return
 	}
 	// Only on the draft -> published edge. Re-saving a published post is not
@@ -199,7 +199,7 @@ func (s *Server) handleDeletePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.q.DeletePost(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete post")
+		s.serverError(w, r, "failed to delete post", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

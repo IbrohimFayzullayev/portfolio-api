@@ -1,11 +1,12 @@
 -- name: CreateInvitation :one
 INSERT INTO invitations (
-    source, session_id, event_date, event_time,
+    source, session_id, guest_name, event_date, event_time,
     food_id, food_label, food_emoji,
     place_id, place_label, place_emoji,
+    venue_id, venue_name, venue_custom,
     invite_text, user_agent
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 )
 RETURNING *;
 

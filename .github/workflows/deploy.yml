@@ -11,6 +11,10 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/ibrohimfayzullayev/portfolio-api
+  # Must match the sqlc you run locally (`sqlc version`): two versions can
+  # format generated code differently, and the drift check below would then
+  # fail for a reason that has nothing to do with the change being pushed.
+  SQLC_VERSION: "1.27.0"
 
 jobs:
   test:
@@ -35,6 +39,20 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+
+      # The one failure this pipeline has actually had: a migration changed the
+      # schema, internal/db was regenerated locally but never committed, and
+      # the build fell over with six confusing "undefined field" errors. This
+      # step turns that into one obvious message, before anything else runs.
+      - name: sqlc code is up to date
+        run: |
+          curl -sSL "https://downloads.sqlc.dev/sqlc_${SQLC_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin sqlc
+          sqlc generate
+          if ! git diff --exit-code --stat internal/db; then
+            echo "::error::internal/db is stale. Run 'make generate' and commit internal/db."
+            exit 1
+          fi
 
       - run: go vet ./...
 
@@ -94,8 +112,12 @@ jobs:
             # The image tag is pinned to this commit rather than `latest`, so a
             # rollback is `TAG=<previous sha> docker compose up -d api`.
             export TAG="${{ github.sha }}"
-            docker compose -f docker-compose.prod.yml --env-file .env pull api
-            docker compose -f docker-compose.prod.yml --env-file .env up -d api
+            # Both services, because both ship from this image: the bot is the
+            # same binary with a different entrypoint. Updating only the API
+            # would leave the bot running whatever it was started with, which
+            # looks exactly like a successful deploy.
+            docker compose -f docker-compose.prod.yml --env-file .env pull api bot
+            docker compose -f docker-compose.prod.yml --env-file .env up -d api bot
 
             # A 200 from the site proves SOMETHING is answering, not that it is
             # the new build — the previous container answers 200 just as well.
@@ -103,13 +125,15 @@ jobs:
             # pulled, so a deploy that quietly kept the old image fails here
             # instead of being reported green.
             want=$(docker image inspect "$REGISTRY/portfolio-api:$TAG" --format '{{.Id}}')
-            got=$(docker inspect "$(docker compose -f docker-compose.prod.yml ps -q api)" --format '{{.Image}}')
-            if [ "$want" != "$got" ]; then
-              echo "FAILED: api is still running $got, expected $want"
-              docker compose -f docker-compose.prod.yml ps api
-              exit 1
-            fi
-            echo "image ok: api -> $TAG"
+            for svc in api bot; do
+              got=$(docker inspect "$(docker compose -f docker-compose.prod.yml ps -q $svc)" --format '{{.Image}}')
+              if [ "$want" != "$got" ]; then
+                echo "FAILED: $svc is still running $got, expected $want"
+                docker compose -f docker-compose.prod.yml ps $svc
+                exit 1
+              fi
+              echo "image ok: $svc -> $TAG"
+            done
 
             for i in $(seq 1 20); do
               if curl -fsS "https://$API_DOMAIN/healthz" >/dev/null; then

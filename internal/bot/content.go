@@ -200,13 +200,34 @@ func (b *Bot) createDraft(ctx context.Context, text string) string {
 
 /* -------------------------------- helpers -------------------------------- */
 
-// slugify mirrors the dashboard's rule: lowercase ASCII, hyphen separated. It
-// deliberately drops anything else rather than transliterating — a wrong guess
-// at a transliteration is worse than an obviously empty result, which the
-// caller replaces with a dated slug.
+// cyrillic transliterates Uzbek and Russian Cyrillic into the Latin alphabet
+// the site's URLs use.
+//
+// This used to be left out on purpose: a wrong guess at a transliteration was
+// judged worse than an empty slug the caller replaces with a dated one. In
+// practice the dated fallback meant every Cyrillic title produced a slug like
+// "qoralama-2026-09-10-1430" that had to be fixed by hand in the dashboard,
+// which is the same wrong guess with extra steps. The mapping below is the
+// ordinary Uzbek one; where the two languages disagree (ц, щ, ы) the Uzbek
+// reading wins, and the slug is editable either way.
+var cyrillic = strings.NewReplacer(
+	"а", "a", "б", "b", "в", "v", "г", "g", "д", "d",
+	"е", "e", "ё", "yo", "ж", "j", "з", "z", "и", "i",
+	"й", "y", "к", "k", "л", "l", "м", "m", "н", "n",
+	"о", "o", "п", "p", "р", "r", "с", "s", "т", "t",
+	"у", "u", "ф", "f", "х", "x", "ц", "ts", "ч", "ch",
+	"ш", "sh", "щ", "sh", "ъ", "", "ы", "i", "ь", "",
+	"э", "e", "ю", "yu", "я", "ya",
+	// Uzbek-specific letters.
+	"ў", "o", "қ", "q", "ғ", "g", "ҳ", "h",
+)
+
+// slugify mirrors the dashboard's rule: lowercase ASCII, hyphen separated.
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.NewReplacer("ʻ", "", "'", "", "’", "", "‘", "").Replace(s)
+	// After lowercasing, so only the lowercase forms need mapping.
+	s = cyrillic.Replace(s)
 	s = slugRe.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
 	if len(s) > 60 {

@@ -34,8 +34,12 @@ db-down: ## Stop PostgreSQL
 db-logs: ## Tail the database logs
 	docker compose logs -f db
 
-generate: ## (Optional) Regenerate internal/db from db/queries with sqlc
+generate: ## Regenerate internal/db from db/queries with sqlc (commit the result)
 	sqlc generate
+	@echo ""
+	@echo "Now: git add internal/db"
+	@echo "CI checks this — a migration whose generated code is not committed"
+	@echo "fails the build (.github/workflows/deploy.yml, SQLC_VERSION)."
 
 test: ## Run unit tests only (fast, no database needed)
 	go test ./...

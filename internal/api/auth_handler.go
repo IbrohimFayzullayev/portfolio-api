@@ -16,7 +16,7 @@ import (
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	count, err := s.q.CountUsers(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check existing users")
+		s.serverError(w, r, "failed to check existing users", err)
 		return
 	}
 	if count > 0 {
@@ -42,7 +42,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := auth.HashPassword(in.Password)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to hash password")
+		s.serverError(w, r, "failed to hash password", err)
 		return
 	}
 
@@ -56,11 +56,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "email already registered")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create user")
+		s.serverError(w, r, "failed to create user", err)
 		return
 	}
 
-	s.respondWithToken(w, http.StatusCreated, user)
+	s.respondWithToken(w, r, http.StatusCreated, user)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +77,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "invalid email or password")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "login failed")
+		s.serverError(w, r, "login failed", err)
 		return
 	}
 
@@ -86,7 +86,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.respondWithToken(w, http.StatusOK, user)
+	s.respondWithToken(w, r, http.StatusOK, user)
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -102,17 +102,22 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "user not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load user")
+		s.serverError(w, r, "failed to load user", err)
 		return
 	}
 
 	writeJSON(w, http.StatusOK, toUserResponse(user))
 }
 
-func (s *Server) respondWithToken(w http.ResponseWriter, status int, user db.User) {
+// Takes the request only so a failure here can be reported like any other:
+// issuing a token cannot fail for a reason the caller could have prevented, so
+// when it does, someone should hear about it.
+func (s *Server) respondWithToken(
+	w http.ResponseWriter, r *http.Request, status int, user db.User,
+) {
 	token, expiresAt, err := s.tokens.Generate(user.ID, user.Email)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to issue token")
+		s.serverError(w, r, "failed to issue token", err)
 		return
 	}
 	writeJSON(w, status, authResponse{

@@ -19,7 +19,7 @@ INSERT INTO posts (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
-RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key
+RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key, publish_at
 `
 
 type CreatePostParams struct {
@@ -69,6 +69,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TranslationKey,
+		&i.PublishAt,
 	)
 	return i, err
 }
@@ -83,7 +84,7 @@ func (q *Queries) DeletePost(ctx context.Context, id uuid.UUID) error {
 }
 
 const getPostByID = `-- name: GetPostByID :one
-SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key FROM posts WHERE id = $1
+SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key, publish_at FROM posts WHERE id = $1
 `
 
 func (q *Queries) GetPostByID(ctx context.Context, id uuid.UUID) (Post, error) {
@@ -105,12 +106,13 @@ func (q *Queries) GetPostByID(ctx context.Context, id uuid.UUID) (Post, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TranslationKey,
+		&i.PublishAt,
 	)
 	return i, err
 }
 
 const getPublishedPostBySlug = `-- name: GetPublishedPostBySlug :one
-SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key FROM posts
+SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key, publish_at FROM posts
 WHERE draft = false AND locale = $1 AND slug = $2
 `
 
@@ -138,12 +140,13 @@ func (q *Queries) GetPublishedPostBySlug(ctx context.Context, arg GetPublishedPo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TranslationKey,
+		&i.PublishAt,
 	)
 	return i, err
 }
 
 const listPosts = `-- name: ListPosts :many
-SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key FROM posts
+SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key, publish_at FROM posts
 WHERE ($1::text IS NULL OR locale = $1)
   AND ($2::boolean IS NULL OR draft = $2)
 ORDER BY content_date DESC, created_at DESC
@@ -179,6 +182,7 @@ func (q *Queries) ListPosts(ctx context.Context, arg ListPostsParams) ([]Post, e
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TranslationKey,
+			&i.PublishAt,
 		); err != nil {
 			return nil, err
 		}
@@ -225,7 +229,7 @@ func (q *Queries) ListPublishedPostSiblings(ctx context.Context, translationKey 
 }
 
 const listPublishedPosts = `-- name: ListPublishedPosts :many
-SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key FROM posts
+SELECT id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key, publish_at FROM posts
 WHERE draft = false
   AND ($1::text IS NULL OR locale = $1)
 ORDER BY content_date DESC, created_at DESC
@@ -256,6 +260,7 @@ func (q *Queries) ListPublishedPosts(ctx context.Context, locale *string) ([]Pos
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TranslationKey,
+			&i.PublishAt,
 		); err != nil {
 			return nil, err
 		}
@@ -273,7 +278,7 @@ SET draft = $2,
     published_at = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key
+RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key, publish_at
 `
 
 type SetPostPublishedParams struct {
@@ -301,6 +306,7 @@ func (q *Queries) SetPostPublished(ctx context.Context, arg SetPostPublishedPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TranslationKey,
+		&i.PublishAt,
 	)
 	return i, err
 }
@@ -321,7 +327,7 @@ SET locale = $2,
     translation_key = $13,
     updated_at = now()
 WHERE id = $1
-RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key
+RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key, publish_at
 `
 
 type UpdatePostParams struct {
@@ -373,6 +379,7 @@ func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) (Post, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TranslationKey,
+		&i.PublishAt,
 	)
 	return i, err
 }
@@ -396,7 +403,7 @@ ON CONFLICT (locale, slug) DO UPDATE SET
     published_at = EXCLUDED.published_at,
     translation_key = EXCLUDED.translation_key,
     updated_at = now()
-RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key
+RETURNING id, locale, slug, title, description, body, tags, cover, featured, draft, content_date, published_at, created_at, updated_at, translation_key, publish_at
 `
 
 type UpsertPostParams struct {
@@ -446,6 +453,7 @@ func (q *Queries) UpsertPost(ctx context.Context, arg UpsertPostParams) (Post, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TranslationKey,
+		&i.PublishAt,
 	)
 	return i, err
 }

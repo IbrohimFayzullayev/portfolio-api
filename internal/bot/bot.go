@@ -20,8 +20,13 @@ import (
 )
 
 type Config struct {
-	Token         string
-	AllowedUserID int64
+	Token string
+
+	// Everyone allowed to talk to the bot. The FIRST is also where every
+	// notification is delivered: a second entry is a backup account, not a
+	// second recipient, and sending each alert twice would only make the one
+	// person reading them read them twice.
+	AllowedUserIDs []int64
 
 	// Reached over the internal Docker network — bypasses Caddy entirely.
 	InternalAPIURL string
@@ -30,21 +35,36 @@ type Config struct {
 	PublicSiteURL string
 	AdminSiteURL  string
 	PublicAPIURL  string
+
+	// Optional: a URL to ping every health cycle, so something outside this
+	// server can notice when the bot stops. Empty means no external pinger —
+	// see deploy/cron/bot-watchdog.sh for the on-host half.
+	HeartbeatPingURL string
+
+	// Umami. All optional: without them the bot simply never prints a traffic
+	// section. Either an API key or a username/password pair works.
+	UmamiURL       string
+	UmamiWebsiteID string
+	UmamiUsername  string
+	UmamiPassword  string
+	UmamiAPIKey    string
 }
 
 type Bot struct {
-	cfg  Config
-	tg   *telegramClient
-	pool *pgxpool.Pool
-	http *http.Client
+	cfg   Config
+	tg    *telegramClient
+	pool  *pgxpool.Pool
+	http  *http.Client
+	umami *umamiClient
 }
 
 func New(cfg Config, pool *pgxpool.Pool) *Bot {
 	return &Bot{
-		cfg:  cfg,
-		tg:   newTelegramClient(cfg.Token),
-		pool: pool,
-		http: &http.Client{Timeout: 8 * time.Second},
+		cfg:   cfg,
+		tg:    newTelegramClient(cfg.Token),
+		pool:  pool,
+		http:  &http.Client{Timeout: 8 * time.Second},
+		umami: newUmamiClient(cfg),
 	}
 }
 
@@ -54,7 +74,13 @@ func (b *Bot) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("bot: connected as @%s (authorised user: %d)", me.Username, b.cfg.AllowedUserID)
+	log.Printf("bot: connected as @%s (authorised users: %v)", me.Username, b.cfg.AllowedUserIDs)
+
+	// The command menu is set on every start, so it always matches the build
+	// that is running rather than whatever was registered months ago.
+	if err := b.tg.setMyCommands(ctx, commandMenu()); err != nil {
+		log.Printf("bot: could not set the command menu: %v", err)
+	}
 
 	// Skip anything queued while the bot was down: on restart we want the
 	// current state, not a replay of yesterday's commands.
@@ -76,6 +102,18 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	// One message each morning at 09:00 Asia/Tashkent.
 	go b.runDailySummary(ctx)
+
+	// And one on Sunday evening, with the week against the week before it.
+	go b.runWeeklyReport(ctx)
+
+	// Twice a day: certificates that are getting close to expiry, which means
+	// automatic renewal has stopped working.
+	go b.runCertWatch(ctx)
+
+	// Turns "due" into "queued" once a minute: invitation reminders, manual
+	// reminders, posts whose publish time has arrived. It never sends anything
+	// itself — everything goes out through the outbox above.
+	go b.runScheduler(ctx)
 
 	var backoff time.Duration
 	for {
@@ -108,6 +146,24 @@ func (b *Bot) Run(ctx context.Context) error {
 			b.handle(ctx, u)
 		}
 	}
+}
+
+// allowed reports whether this user may talk to the bot.
+func (c Config) allowed(userID int64) bool {
+	for _, id := range c.AllowedUserIDs {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
+// notifyTarget is where queued messages go: the first configured user.
+func (c Config) notifyTarget() int64 {
+	if len(c.AllowedUserIDs) == 0 {
+		return 0
+	}
+	return c.AllowedUserIDs[0]
 }
 
 func nextBackoff(d time.Duration) time.Duration {
@@ -145,10 +201,38 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 
 	// The bot can read the database. Anyone who is not the owner gets no
 	// answer at all — not even a refusal, which would confirm it exists.
-	if msg.From.ID != b.cfg.AllowedUserID {
+	if !b.cfg.allowed(msg.From.ID) {
 		log.Printf("bot: ignoring message from unauthorised user %d (@%s)",
 			msg.From.ID, msg.From.Username)
 		return
+	}
+
+	// Each command gets its own deadline so a stuck check cannot wedge the loop.
+	cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+
+	started := time.Now()
+
+	// A file is a post. Checked before the text path, because a document
+	// message carries no text at all and would otherwise be dropped below.
+	if msg.Document != nil {
+		reply := b.importDocument(cctx, msg.Document, msg.Caption)
+		if err := b.tg.sendMessage(cctx, msg.Chat.ID, reply); err != nil {
+			log.Printf("bot: sendMessage failed: %v", err)
+		}
+		return
+	}
+
+	// An answer to something the bot asked. The question is identified by the
+	// message it replies to, so no state had to survive in this process.
+	if msg.ReplyToMessage != nil {
+		if reply := b.answerPrompt(cctx, msg.Chat.ID, msg.ReplyToMessage.MessageID, msg.Text); reply != "" {
+			if err := b.tg.sendMessage(cctx, msg.Chat.ID, reply); err != nil {
+				log.Printf("bot: sendMessage failed: %v", err)
+			}
+			return
+		}
+		// Not one of ours: fall through and treat it as an ordinary message.
 	}
 
 	// A photo or sticker arrives with no text at all — Fields would be empty.
@@ -161,15 +245,19 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		cmd = cmd[:i] // "/status@my_bot" in groups
 	}
 
-	// Each command gets its own deadline so a stuck check cannot wedge the loop.
-	cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
-	defer cancel()
-
 	switch cmd {
 	case "/posts":
 		// Sent with its own keyboard, so it does not go through the plain
 		// reply path below.
 		b.sendPostsList(cctx, msg.Chat.ID)
+		return
+	case "/xatolar":
+		// Same: each group carries its own mute button.
+		b.sendErrorsList(cctx, msg.Chat.ID)
+		return
+	case "/tahrir":
+		b.sendEditCard(cctx, msg.Chat.ID,
+			strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 		return
 	case "/qoralama":
 		reply := b.createDraft(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
@@ -189,12 +277,43 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		reply = b.invitationsReport(cctx)
 	case "/kunlik":
 		reply = b.dailySummary(cctx)
+	case "/stat":
+		reply = b.statsReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+	case "/xato":
+		reply = b.errorDetail(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+	case "/eslatma":
+		reply = b.createReminder(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+	case "/rejalash":
+		reply = b.schedulePost(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	default:
 		reply = "Bunday buyruq yo'q. /help"
 	}
 
 	if err := b.tg.sendMessage(cctx, msg.Chat.ID, reply); err != nil {
 		log.Printf("bot: sendMessage failed: %v", err)
+	}
+
+	// Which command is getting slow is not obvious from the outside: every one
+	// of them answers eventually, and "eventually" is the whole question.
+	log.Printf("bot: %s took %s", cmd, time.Since(started).Round(time.Millisecond))
+}
+
+// commandMenu is what Telegram shows in the menu button. Kept beside helpText
+// on purpose — two lists that describe the same commands drift apart the first
+// time only one of them is updated.
+func commandMenu() []botCommand {
+	return []botCommand{
+		{Command: "status", Description: "Stack holati va uptime"},
+		{Command: "posts", Description: "Oxirgi postlar, nashr tugmalari bilan"},
+		{Command: "tahrir", Description: "Postni tahrirlash kartasi"},
+		{Command: "qoralama", Description: "Matndan qoralama yaratish"},
+		{Command: "rejalash", Description: "Postni belgilangan vaqtda nashr qilish"},
+		{Command: "eslatma", Description: "O'zingizga eslatma qo'yish"},
+		{Command: "stat", Description: "Trafik va kontent statistikasi"},
+		{Command: "kunlik", Description: "Bugungi qisqacha hisobot"},
+		{Command: "xatolar", Description: "Oxirgi 24 soat xatolari"},
+		{Command: "invitations", Description: "Oxirgi taklifnomalar"},
+		{Command: "help", Description: "Buyruqlar ro'yxati"},
 	}
 }
 
@@ -203,7 +322,7 @@ func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
 	if q.From == nil {
 		return
 	}
-	if q.From.ID != b.cfg.AllowedUserID {
+	if !b.cfg.allowed(q.From.ID) {
 		log.Printf("bot: ignoring callback from unauthorised user %d", q.From.ID)
 		return
 	}
@@ -211,7 +330,52 @@ func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
 	cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 
-	notice := b.applyPostAction(cctx, q.Data)
+	// Where to send a follow-up question, if the button asks one. In a private
+	// chat this is the same as the user id; taking it from the message keeps
+	// that an assumption the code does not depend on.
+	chatID := q.From.ID
+	if q.Message != nil && q.Message.Chat != nil {
+		chatID = q.Message.Chat.ID
+	}
+
+	// The prefix says which list the button came from, and therefore which one
+	// has to be redrawn afterwards. Redrawing the posts list after a mute
+	// press would replace the message the button was attached to.
+	action, arg, _ := strings.Cut(q.Data, ":")
+
+	var (
+		notice string
+		redraw func(context.Context) (string, *inlineKeyboard)
+	)
+	switch action {
+	case "mute":
+		notice = b.muteError(cctx, arg)
+		redraw = b.errorsList
+
+	case "ed":
+		// "ed:<field>:<post id>" — asks a question instead of changing
+		// anything, so there is nothing to redraw yet.
+		key, postID, _ := strings.Cut(arg, ":")
+		notice = b.startEdit(cctx, chatID, key, postID)
+
+	case "tr":
+		notice = b.createTranslationPair(cctx, arg)
+		redraw = func(c context.Context) (string, *inlineKeyboard) {
+			return b.editCard(c, arg)
+		}
+
+	case "epub", "edrf":
+		// The same publish toggle as the list, pressed from the edit card —
+		// which is therefore what gets redrawn, not the list.
+		notice = b.applyPostAction(cctx, strings.TrimPrefix(action, "e")+":"+arg)
+		redraw = func(c context.Context) (string, *inlineKeyboard) {
+			return b.editCard(c, arg)
+		}
+
+	default:
+		notice = b.applyPostAction(cctx, q.Data)
+		redraw = b.postsList
+	}
 
 	// Always answer, even on failure: an unanswered callback leaves the button
 	// spinning and the bot looking dead.
@@ -219,9 +383,10 @@ func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
 		log.Printf("bot: answerCallback failed: %v", err)
 	}
 
-	// Redraw the list in place so the new state is visible immediately.
-	if q.Message != nil && q.Message.Chat != nil {
-		text, markup := b.postsList(cctx)
+	// Redraw in place so the new state is visible immediately. Some actions
+	// have nothing to redraw — asking a question leaves the card as it was.
+	if redraw != nil && q.Message != nil && q.Message.Chat != nil {
+		text, markup := redraw(cctx)
 		if err := b.tg.editMessageText(
 			cctx, q.Message.Chat.ID, q.Message.MessageID, text, markup,
 		); err != nil {
@@ -234,11 +399,27 @@ func helpText() string {
 	return strings.Join([]string{
 		"<b>Platforma boti</b>",
 		"",
-		"/status — stack holati (tashqi + ichki)",
+		"<b>Kontent</b>",
 		"/posts — oxirgi postlar, nashr tugmalari bilan",
+		"/tahrir &lt;slug&gt; — tahrirlash kartasi (yoki /tahrir oxirgi)",
 		"/qoralama &lt;matn&gt; — birinchi qator sarlavha, qolgani matn",
-		"/invitations — oxirgi taklifnomalar",
+		".md fayl yuborsangiz — post yaratiladi yoki yangilanadi",
+		"",
+		"<b>Vaqt bo'yicha</b>",
+		"/rejalash &lt;slug&gt; 20.09 10:00 — belgilangan vaqtda nashr",
+		"/rejalash — rejalashtirilganlar ro'yxati",
+		"/eslatma 20.09 14:00 &lt;matn&gt; — o'zingizga eslatma",
+		"",
+		"<b>Ma'lumot</b>",
+		"/status — stack holati, uptime, oxirgi uzilish",
+		"/stat [kun|hafta|oy] — trafik va kontent",
 		"/kunlik — bugungi qisqacha hisobot",
+		"/invitations — oxirgi taklifnomalar",
+		"",
+		"<b>Xatolar</b>",
+		"/xatolar — 24 soat, guruhlangan, jimlatish tugmasi bilan",
+		"/xato &lt;id&gt; — bitta guruh: stack va statistika",
+		"",
 		"/help — shu ro'yxat",
 	}, "\n")
 }

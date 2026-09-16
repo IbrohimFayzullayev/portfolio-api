@@ -117,7 +117,11 @@ jobs:
             # would leave the bot running whatever it was started with, which
             # looks exactly like a successful deploy.
             docker compose -f docker-compose.prod.yml --env-file .env pull api bot
-            docker compose -f docker-compose.prod.yml --env-file .env up -d api bot
+            # --no-deps for the same reason the other two repos need it: TAG
+            # applies to every service in the file, so a dependency must never
+            # be resolved at this deploy's tag. db is a fixed image and is
+            # already running.
+            docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps api bot
 
             # A 200 from the site proves SOMETHING is answering, not that it is
             # the new build — the previous container answers 200 just as well.

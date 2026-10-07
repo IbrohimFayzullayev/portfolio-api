@@ -3,10 +3,16 @@ name: Build & Deploy API
 on:
   push:
     branches: [main]
+  # Tests only — see the `if` on build and deploy. A pull request gets the
+  # same gate `main` does, before the merge rather than after it.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
-  group: deploy-api
+  # Deploys queue behind each other; a pull request's test run gets its own
+  # group so it never waits for (or holds up) a deploy.
+  group: deploy-api-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
   cancel-in-progress: false
 
 env:
@@ -64,6 +70,7 @@ jobs:
 
   build:
     needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -93,11 +100,19 @@ jobs:
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      # Lets this job's own token pull the image it is about to deploy.
+      packages: read
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          envs: GHCR_USER,GHCR_TOKEN
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
@@ -116,7 +131,23 @@ jobs:
             # same binary with a different entrypoint. Updating only the API
             # would leave the bot running whatever it was started with, which
             # looks exactly like a successful deploy.
-            docker compose -f docker-compose.prod.yml --env-file .env pull api bot
+            # Pull with a token minted for this run, kept in a throwaway docker
+            # config. The server used to rely on a personal access token from a
+            # one-off `docker login`; when that expired, every deploy failed with
+            # "denied" while the old container kept answering. This token cannot
+            # go stale between deploys because it never outlives one, and the
+            # temporary config means it does not overwrite the server's own login.
+            img="$REGISTRY/portfolio-api:$TAG"
+            auth=$(mktemp -d)
+            trap 'rm -rf "$auth"' EXIT
+            echo "$GHCR_TOKEN" | docker --config "$auth" login ghcr.io -u "$GHCR_USER" --password-stdin
+            if ! docker --config "$auth" pull "$img"; then
+              echo "pull with the run token failed; trying the server's stored login"
+              if ! docker pull "$img"; then
+                echo "FAILED: cannot pull $img (registry access)"
+                exit 1
+              fi
+            fi
             # --no-deps for the same reason the other two repos need it: TAG
             # applies to every service in the file, so a dependency must never
             # be resolved at this deploy's tag. db is a fixed image and is

@@ -25,6 +25,22 @@ dead bot but not a dead server. To close that, set `HEARTBEAT_PING_URL` in
 `.env` to a check URL from any external uptime service; the bot pings it every
 two minutes, and that service alerts when the pings stop.
 
+**Off-site copy.** By default the dump stays in `/var/backups/portfolio` — on
+the same disk as the database it is a copy of. That covers a bad migration or
+an accidental `DELETE`; it does not cover losing the server. To copy every dump
+somewhere else, install [rclone](https://rclone.org/install/), run
+`rclone config` once (as the same user the cron job runs as) to create a
+remote, and add its destination to `.env`:
+
+```sh
+BACKUP_REMOTE=b2:my-bucket/portfolio      # or s3:…, r2:…, sftp-host:path
+BACKUP_REMOTE_KEEP_DAYS=30                # optional, default 30
+```
+
+The morning backup message then says whether the copy went out. If
+`BACKUP_REMOTE` is set and the copy fails, the bot says so immediately — the
+local dump succeeding would otherwise hide it forever.
+
 **Restore test.** The bot queues a reminder on the first of each month. A
 backup nobody has restored is a file, not a backup:
 

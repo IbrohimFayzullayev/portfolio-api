@@ -11,12 +11,16 @@ import (
 )
 
 type Querier interface {
+	CountContactMessages(ctx context.Context) (int64, error)
 	CountInvitations(ctx context.Context) (int64, error)
+	CountUnreadContactMessages(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
+	CreateContactMessage(ctx context.Context, arg CreateContactMessageParams) (ContactMessage, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreatePost(ctx context.Context, arg CreatePostParams) (Post, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteContactMessage(ctx context.Context, id uuid.UUID) error
 	DeleteInvitation(ctx context.Context, id uuid.UUID) error
 	DeletePost(ctx context.Context, id uuid.UUID) error
 	DeleteProject(ctx context.Context, id uuid.UUID) error
@@ -27,6 +31,7 @@ type Querier interface {
 	GetPublishedProjectBySlug(ctx context.Context, arg GetPublishedProjectBySlugParams) (Project, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	ListContactMessages(ctx context.Context, arg ListContactMessagesParams) ([]ContactMessage, error)
 	ListInvitations(ctx context.Context, arg ListInvitationsParams) ([]Invitation, error)
 	ListPosts(ctx context.Context, arg ListPostsParams) ([]Post, error)
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
@@ -36,6 +41,7 @@ type Querier interface {
 	ListPublishedPosts(ctx context.Context, locale *string) ([]Post, error)
 	ListPublishedProjectSiblings(ctx context.Context, translationKey string) ([]ListPublishedProjectSiblingsRow, error)
 	ListPublishedProjects(ctx context.Context, locale *string) ([]Project, error)
+	MarkContactMessageRead(ctx context.Context, id uuid.UUID) (int64, error)
 	SetPostPublished(ctx context.Context, arg SetPostPublishedParams) (Post, error)
 	UpdatePost(ctx context.Context, arg UpdatePostParams) (Post, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)

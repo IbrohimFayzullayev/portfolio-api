@@ -97,10 +97,20 @@ func (s *Server) reportError(r *http.Request, kind string, severity int, msg, st
 
 	// Everything needed is copied out of the request here, because the request
 	// is usually finished by the time the goroutine runs.
-	go s.recordError(fp, kind, route, severity, truncateChars(msg, maxMessageChars), stack)
+	go s.recordError("api", fp, kind, route, severity, truncateChars(msg, maxMessageChars), stack, nil)
 }
 
-func (s *Server) recordError(fp, kind, route string, severity int, msg, stack string) {
+// recordError writes one occurrence into its group and decides whether to
+// speak about it.
+//
+// mayNotify is an extra gate for sources this server does not control. An API
+// error is produced by the API, so its volume is bounded by the API's own
+// behaviour; a browser error is produced by whoever is on the other end of a
+// public endpoint. The occurrence is always recorded — the gate only decides
+// whether Telegram hears about it. nil means "always".
+func (s *Server) recordError(
+	service, fp, kind, route string, severity int, msg, stack string, mayNotify func() bool,
+) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -117,17 +127,18 @@ func (s *Server) recordError(fp, kind, route string, severity int, msg, stack st
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO error_groups
 			(fingerprint, service, route, severity, message, sample_stack, count)
-		VALUES ($1, 'api', $2, $3, $4, $5, 1)
+		VALUES ($1, $6, $2, $3, $4, $5, 1)
 		ON CONFLICT (fingerprint) DO UPDATE
 		SET count        = error_groups.count + 1,
 		    last_seen    = now(),
+		    route        = EXCLUDED.route,
 		    severity     = GREATEST(error_groups.severity, EXCLUDED.severity),
 		    message      = EXCLUDED.message,
 		    sample_stack = CASE WHEN EXCLUDED.sample_stack <> ''
 		                       THEN EXCLUDED.sample_stack
 		                       ELSE error_groups.sample_stack END
 		RETURNING count, notified_count, notified_at, muted_until`,
-		fp, route, severity, msg, stack,
+		fp, route, severity, msg, stack, service,
 	).Scan(&total, &notified, &notifiedAt, &mutedUntil)
 	if err != nil {
 		log.Printf("errors: could not record %s: %v", fp, err)
@@ -140,6 +151,8 @@ func (s *Server) recordError(fp, kind, route string, severity int, msg, stack st
 		return // silenced from Telegram, on purpose
 	case notifiedAt != nil && now.Sub(*notifiedAt) < errorNotifyWindow:
 		return // already said this recently
+	case mayNotify != nil && !mayNotify():
+		return // recorded, but this source has used up its share of alerts
 	}
 
 	if _, err := s.pool.Exec(ctx, `

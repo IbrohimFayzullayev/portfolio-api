@@ -25,6 +25,17 @@ type BotPrompt struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+type ContactMessage struct {
+	ID        uuid.UUID  `json:"id"`
+	Name      string     `json:"name"`
+	Email     string     `json:"email"`
+	Message   string     `json:"message"`
+	Locale    string     `json:"locale"`
+	UserAgent string     `json:"user_agent"`
+	ReadAt    *time.Time `json:"read_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
 type ErrorGroup struct {
 	Fingerprint   string     `json:"fingerprint"`
 	Service       string     `json:"service"`

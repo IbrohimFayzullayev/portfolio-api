@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -92,5 +93,97 @@ func TestSeverityOf(t *testing.T) {
 		if got := severityOf(tc.n); got != tc.want {
 			t.Errorf("%s: severityOf = %d, want %d", tc.name, got, tc.want)
 		}
+	}
+}
+
+// The two kinds the public site can cause. Both carry text a stranger typed,
+// so the thing worth pinning down is that it arrives escaped: Telegram parses
+// these messages as HTML, and an unescaped "<" is a rejected message at best.
+func TestRenderVisitorSuppliedKinds(t *testing.T) {
+	b := &Bot{cfg: Config{AdminSiteURL: "https://admin.example.com/"}}
+
+	contact := b.renderNotification(notification{
+		kind: "contact.created",
+		payload: map[string]any{
+			"name":    "Ali <b>Valiyev</b>",
+			"email":   "ali@example.com",
+			"locale":  "uz",
+			"message": "Salom & rahmat <script>",
+		},
+	})
+	for _, want := range []string{
+		"Ali &lt;b&gt;Valiyev&lt;/b&gt;",
+		"ali@example.com · uz",
+		"Salom &amp; rahmat &lt;script&gt;",
+		"https://admin.example.com/messages",
+	} {
+		if !strings.Contains(contact, want) {
+			t.Errorf("contact.created is missing %q:\n%s", want, contact)
+		}
+	}
+
+	web := b.renderNotification(notification{
+		kind: "error.web",
+		payload: map[string]any{
+			"fingerprint": "abcdef123456",
+			"route":       "/uz/blog",
+			"message":     "x is not a function <anonymous>",
+			"count":       float64(3),
+		},
+	})
+	for _, want := range []string{"×3", "/uz/blog", "&lt;anonymous&gt;", "/xato abcdef123456"} {
+		if !strings.Contains(web, want) {
+			t.Errorf("error.web is missing %q:\n%s", want, web)
+		}
+	}
+
+	// A browser error is a warning: seen in the morning, not at 03:00.
+	if got := defaultSeverity("error.web"); got != sevWarning {
+		t.Errorf("defaultSeverity(error.web) = %d, want %d", got, sevWarning)
+	}
+	if got := defaultSeverity("contact.created"); got != sevInfo {
+		t.Errorf("defaultSeverity(contact.created) = %d, want %d", got, sevInfo)
+	}
+}
+
+// Every kind that is treated as critical has to render to something. A kind
+// with a severity but no message is the worst combination there is: the row is
+// marked delivered, so nothing retries it and nothing reports it missing.
+// host.alert was exactly that until this test existed.
+func TestCriticalKindsRender(t *testing.T) {
+	b := &Bot{}
+	kinds := []string{
+		"health.down", "health.recovered", "error.panic", "error.rate",
+		"cert.expiring", "backup.missing", "backup.offsite_failed", "host.alert",
+	}
+	for _, kind := range kinds {
+		if defaultSeverity(kind) != sevCritical {
+			t.Errorf("%s is expected to be critical", kind)
+		}
+		if b.renderNotification(notification{kind: kind, payload: map[string]any{}}) == "" {
+			t.Errorf("%s is critical but renders to nothing — it would be silently dropped", kind)
+		}
+	}
+}
+
+func TestBackupMessageSaysWhereTheCopyIs(t *testing.T) {
+	b := &Bot{}
+	render := func(offsite any) string {
+		p := map[string]any{"size": "1.2M", "duration": "3s"}
+		if offsite != nil {
+			p["offsite"] = offsite
+		}
+		return b.renderNotification(notification{kind: "backup.finished", payload: p})
+	}
+
+	if got := render("ok"); !strings.Contains(got, "Tashqi nusxa yuborildi") {
+		t.Errorf("offsite ok: %q", got)
+	}
+	if got := render("off"); !strings.Contains(got, "Faqat shu serverda") {
+		t.Errorf("offsite off: %q", got)
+	}
+	// A row from before the field existed keeps its old two-line shape.
+	if got := render(nil); strings.Count(got, "\n") != 2 {
+		t.Errorf("legacy row changed shape: %q", got)
 	}
 }

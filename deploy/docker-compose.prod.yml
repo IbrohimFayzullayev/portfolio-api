@@ -70,6 +70,10 @@ services:
       UMAMI_USERNAME: ${UMAMI_USERNAME:-}
       UMAMI_PASSWORD: ${UMAMI_PASSWORD:-}
       UMAMI_API_KEY: ${UMAMI_API_KEY:-}
+      # Optional. A check URL from an external uptime service (healthchecks.io
+      # or similar); the bot GETs it every two minutes. The only alert that
+      # still fires when this whole server is gone. See deploy/cron/README.md.
+      HEARTBEAT_PING_URL: ${HEARTBEAT_PING_URL:-}
     networks: [internal]
 
   web:

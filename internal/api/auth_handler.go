@@ -120,6 +120,9 @@ func (s *Server) respondWithToken(
 		s.serverError(w, r, "failed to issue token", err)
 		return
 	}
+	// The cookie is the dashboard's session. The token is still returned in
+	// the body for clients that are not browsers; the dashboard ignores it.
+	s.setSessionCookie(w, token, expiresAt)
 	writeJSON(w, status, authResponse{
 		Token:     token,
 		ExpiresAt: expiresAt,

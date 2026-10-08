@@ -25,6 +25,18 @@ type Server struct {
 	// Guards the one public write endpoint (invitation submissions).
 	invLimiter *rateLimiter
 
+	// Credential guessing is the one attack a single-user CMS is certain to
+	// see. Per IP, across login and register.
+	authLimiter *rateLimiter
+
+	// The contact form: per IP, and one shared budget for the whole endpoint.
+	contactLimiter *rateLimiter
+	contactBudget  *rateLimiter
+
+	// Browser error reports: per IP, and a cap on how many become alerts.
+	clientErrorLimiter *rateLimiter
+	clientErrorBudget  *rateLimiter
+
 	// Sliding window of recent 5xx responses, for the burst alert.
 	errRate *errorRate
 }
@@ -38,7 +50,17 @@ func NewServer(cfg *config.Config, pool *pgxpool.Pool) *Server {
 		// 10 submissions per IP per hour is far above real use and far below
 		// anything worth calling spam.
 		invLimiter: newRateLimiter(10, time.Hour),
-		errRate:    &errorRate{},
+		// Ten tries per quarter hour is invisible to someone who mistyped a
+		// password and turns a dictionary run into a matter of years.
+		authLimiter: newRateLimiter(10, 15*time.Minute),
+		// Nobody writes five messages an hour by hand.
+		contactLimiter: newRateLimiter(5, time.Hour),
+		contactBudget:  newRateLimiter(30, time.Hour),
+		// A page stuck in an error loop reports the same thing repeatedly;
+		// thirty is enough to see that without storing all of it.
+		clientErrorLimiter: newRateLimiter(30, time.Hour),
+		clientErrorBudget:  newRateLimiter(6, time.Hour),
+		errRate:            &errorRate{},
 	}
 	s.router = s.routes()
 	return s
@@ -50,7 +72,8 @@ func (s *Server) routes() *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// Ours, not middleware.RealIP — see realIP for why that one is unsafe here.
+	r.Use(realIP)
 	r.Use(middleware.Logger)
 	// Ours instead of middleware.Recoverer: two recoveries in one chain means
 	// the inner one swallows the panic and the outer one never hears about it,
@@ -61,10 +84,14 @@ func (s *Server) routes() *chi.Mux {
 	r.Use(s.watchErrorRate)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   s.cfg.CORSOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: false,
+		AllowedOrigins: s.cfg.CORSOrigins,
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
+		// The dashboard's session lives in an HttpOnly cookie, and a browser
+		// only attaches a cookie to a cross-origin request when the server
+		// says so here. Safe with an explicit origin list; the cookie-auth
+		// path additionally checks Origin itself (see authMiddleware).
+		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
@@ -72,8 +99,11 @@ func (s *Server) routes() *chi.Mux {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Route("/auth", func(r chi.Router) {
-			r.Post("/register", s.handleRegister)
-			r.Post("/login", s.handleLogin)
+			r.With(s.authLimiter.middleware).Post("/register", s.handleRegister)
+			r.With(s.authLimiter.middleware).Post("/login", s.handleLogin)
+			// No auth on purpose: logging out must work with an expired or
+			// already-invalid session, which is when people press it.
+			r.Post("/logout", s.handleLogout)
 			r.With(s.authMiddleware).Get("/me", s.handleMe)
 		})
 
@@ -89,6 +119,15 @@ func (s *Server) routes() *chi.Mux {
 			// necessity — the visitor is not a user of this system.
 			r.With(s.invLimiter.middleware).
 				Post("/invitations", s.handleCreateInvitation)
+
+			// The public site's contact form and its error boundaries. Both
+			// arrive through the site's own server routes, never straight
+			// from the browser — the site knows this API only by its
+			// internal address.
+			r.With(s.contactLimiter.middleware).
+				Post("/contact", s.handleCreateContact)
+			r.With(s.clientErrorLimiter.middleware).
+				Post("/client-errors", s.handleClientError)
 		})
 
 		r.Group(func(r chi.Router) {
@@ -109,6 +148,16 @@ func (s *Server) routes() *chi.Mux {
 				r.Get("/{id}", s.handleGetInvitation)
 				r.Delete("/{id}", s.handleDeleteInvitation)
 			})
+
+			// Contact form messages.
+			r.Route("/messages", func(r chi.Router) {
+				r.Get("/", s.handleListContactMessages)
+				r.Patch("/{id}/read", s.handleMarkContactMessageRead)
+				r.Delete("/{id}", s.handleDeleteContactMessage)
+			})
+
+			// One read-only snapshot of how the stack is doing.
+			r.Get("/system", s.handleSystemOverview)
 
 			r.Route("/projects", func(r chi.Router) {
 				r.Get("/", s.handleListProjects)

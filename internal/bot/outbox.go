@@ -283,9 +283,9 @@ func quietHoursDefer(now time.Time, severity int) (time.Time, bool) {
 func defaultSeverity(kind string) int {
 	switch kind {
 	case "health.down", "error.panic", "error.rate",
-		"cert.expiring", "backup.missing", "host.alert":
+		"cert.expiring", "backup.missing", "backup.offsite_failed", "host.alert":
 		return sevCritical
-	case "error.api":
+	case "error.api", "error.web":
 		// Loud enough to be seen in the morning, not loud enough to be worth
 		// waking up for: one failing query is not an outage, and the rate
 		// watch is what notices when it is.
@@ -471,12 +471,39 @@ func (b *Bot) renderNotification(n notification) string {
 			head, escapeHTML(str(n.payload, "host")), escapeHTML(str(n.payload, "until")))
 
 	case "backup.finished":
-		return fmt.Sprintf("💾 <b>Backup</b>\n\n%s · %s",
+		text := fmt.Sprintf("💾 <b>Backup</b>\n\n%s · %s",
 			escapeHTML(str(n.payload, "size")), escapeHTML(str(n.payload, "duration")))
+		// Says which kind of backup this was. A dump that only exists next to
+		// the database it copies should not read the same as one that left
+		// the building. Rows from an older backup.sh have no field at all and
+		// are left as they were.
+		switch str(n.payload, "offsite") {
+		case "ok":
+			text += "\n☁️ Tashqi nusxa yuborildi"
+		case "off":
+			text += "\n<i>Faqat shu serverda — tashqi nusxa sozlanmagan.</i>"
+		case "failed":
+			text += "\n⚠️ Tashqi nusxa yuborilmadi"
+		}
+		return text
+
+	case "backup.offsite_failed":
+		return fmt.Sprintf("☁️ <b>Tashqi backup yuborilmadi</b>\n\n%s\n%s\n\n<i>Lokal nusxa bor, lekin faqat shu serverda.</i>",
+			escapeHTML(str(n.payload, "file")), escapeHTML(str(n.payload, "error")))
 
 	case "backup.missing":
 		return fmt.Sprintf("💾 <b>Backup yo'q</b>\n\nOxirgisi: %s (%d soat oldin)",
 			escapeHTML(str(n.payload, "last")), num(n.payload, "hours"))
+
+	case "host.alert":
+		// host-metrics.sh switches to this kind when the disk passes its
+		// threshold. Until this case existed the row was treated as an unknown
+		// kind — marked delivered, never sent — so the one alert with plenty
+		// of warning built in was the one that never arrived.
+		return fmt.Sprintf("🚨 <b>Server: disk to'lmoqda</b>\n\nDisk: %s\nXotira: %s\nYuk: %s",
+			escapeHTML(str(n.payload, "disk")),
+			escapeHTML(str(n.payload, "memory")),
+			escapeHTML(str(n.payload, "load")))
 
 	case "host.metrics":
 		return fmt.Sprintf("🖥 <b>Server</b>\n\nDisk: %s\nXotira: %s\nYuk: %s",
@@ -486,6 +513,33 @@ func (b *Bot) renderNotification(n notification) string {
 
 	case "weekly.summary":
 		return str(n.payload, "text")
+
+	case "error.web":
+		// Same shape as an API error on purpose — it is the same table and the
+		// same /xato. The first line of the detail is the page it happened on.
+		return fmt.Sprintf("🌐 <b>Sayt xatosi</b> ×%d\n\n<code>%s</code>\n%s\n\n<code>/xato %s</code>",
+			num(n.payload, "count"),
+			escapeHTML(str(n.payload, "route")),
+			escapeHTML(truncate(str(n.payload, "message"), 300)),
+			escapeHTML(str(n.payload, "fingerprint")))
+
+	case "contact.created":
+		var sb strings.Builder
+		sb.WriteString("✉️ <b>Saytdan xabar</b>\n")
+		sb.WriteString("\n👤 " + escapeHTML(str(n.payload, "name")))
+		if email := str(n.payload, "email"); email != "" {
+			sb.WriteString("\n📧 " + escapeHTML(email))
+		}
+		if locale := str(n.payload, "locale"); locale != "" {
+			sb.WriteString(" · " + escapeHTML(locale))
+		}
+		// The API already cut this to an excerpt; the limit here only guards
+		// against a row written by something else.
+		sb.WriteString("\n\n" + escapeHTML(truncate(str(n.payload, "message"), 1200)))
+		if b.cfg.AdminSiteURL != "" {
+			sb.WriteString("\n\n" + escapeHTML(strings.TrimSuffix(b.cfg.AdminSiteURL, "/")+"/messages"))
+		}
+		return sb.String()
 
 	case "error.rate":
 		return fmt.Sprintf("⚠️ <b>Xatolar to'lqini</b>\n\n%d daqiqada %d ta 5xx javob.\n\n/xatolar",

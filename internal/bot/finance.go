@@ -1209,6 +1209,16 @@ func (b *Bot) webAppKeyboard() *inlineKeyboard {
 	}}}
 }
 
+// menuButton is what sits left of the input box: the reports, one tap away,
+// when a Mini App URL exists; otherwise Telegram's ordinary command list.
+func (b *Bot) menuButton() menuButton {
+	url := b.webAppURL()
+	if url == "" {
+		return menuButton{Type: "commands"}
+	}
+	return menuButton{Type: "web_app", Text: "Hisobot", WebApp: &webAppInfo{URL: url}}
+}
+
 func (b *Bot) webAppURL() string {
 	base := strings.TrimSuffix(b.cfg.AdminSiteURL, "/")
 	if !strings.HasPrefix(base, "https://") {

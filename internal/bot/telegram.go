@@ -325,6 +325,20 @@ func (c *telegramClient) answerCallback(ctx context.Context, id, text string) er
 	}, nil)
 }
 
+// menuButton is the button left of the chat's input box. "web_app" makes it
+// open a Mini App directly; "commands" is Telegram's default command list.
+type menuButton struct {
+	Type   string      `json:"type"`
+	Text   string      `json:"text,omitempty"`
+	WebApp *webAppInfo `json:"web_app,omitempty"`
+}
+
+// setChatMenuButton sets the default menu button for every private chat with
+// the bot. Telegram's own command list stays reachable by typing "/".
+func (c *telegramClient) setChatMenuButton(ctx context.Context, button menuButton) error {
+	return c.call(ctx, "setChatMenuButton", map[string]any{"menu_button": button}, nil)
+}
+
 // botCommand is one entry in Telegram's command menu.
 type botCommand struct {
 	Command     string `json:"command"`

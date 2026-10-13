@@ -82,6 +82,13 @@ func (b *Bot) Run(ctx context.Context) error {
 		log.Printf("bot: could not set the command menu: %v", err)
 	}
 
+	// Same reasoning for the menu button: set from code on every start, so a
+	// change made by hand in BotFather does not silently disagree with the
+	// build. It opens the reports Mini App; commands remain one "/" away.
+	if err := b.tg.setChatMenuButton(ctx, b.menuButton()); err != nil {
+		log.Printf("bot: could not set the menu button: %v", err)
+	}
+
 	// Skip anything queued while the bot was down: on restart we want the
 	// current state, not a replay of yesterday's commands.
 	offset, err := b.drainBacklog(ctx)

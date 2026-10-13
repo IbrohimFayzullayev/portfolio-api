@@ -124,3 +124,21 @@ func TestWebAppButtonJSON(t *testing.T) {
 		t.Error("non-https admin URL should give no Mini App button")
 	}
 }
+
+func TestMenuButtonJSON(t *testing.T) {
+	b := &Bot{cfg: Config{AdminSiteURL: "https://admin.example.com"}}
+	raw, err := json.Marshal(map[string]any{"menu_button": b.menuButton()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"menu_button":{"type":"web_app","text":"Hisobot","web_app":{"url":"https://admin.example.com/tg"}}}`
+	if string(raw) != want {
+		t.Errorf("menu button JSON:\n got  %s\n want %s", raw, want)
+	}
+
+	// Without an https admin URL the default command list comes back.
+	local := &Bot{cfg: Config{AdminSiteURL: "http://localhost:3001"}}
+	if raw, _ := json.Marshal(local.menuButton()); string(raw) != `{"type":"commands"}` {
+		t.Errorf("fallback menu button = %s", raw)
+	}
+}

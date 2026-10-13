@@ -303,6 +303,26 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		b.sendEditCard(cctx, msg.Chat.ID,
 			strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 		return
+	case "/hujjat", "/hujjatlar":
+		b.sendNotes(cctx, msg.Chat.ID, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+		return
+	case "/bugun", "/sprint", "/kitoblar":
+		// Each carries a button that opens the same numbers as charts.
+		arg := strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0]))
+		var text string
+		var markup *inlineKeyboard
+		switch cmd {
+		case "/bugun":
+			text, markup = b.todayReport(cctx), b.tabKeyboard("growth", "📈 Grafiklar")
+		case "/sprint":
+			text, markup = b.sprintCommand(cctx, arg), b.tabKeyboard("growth", "📈 Sprintlar va grafiklar")
+		default:
+			text, markup = b.booksReport(cctx, arg), b.tabKeyboard("books", "📚 Grafiklar")
+		}
+		if err := b.tg.sendMessageMarkup(cctx, msg.Chat.ID, text, markup); err != nil {
+			log.Printf("bot: sendMessage failed: %v", err)
+		}
+		return
 	case "/yakun":
 		// Sends the summary and then the two recordings, so it replies itself.
 		b.closeSprint(cctx, msg.Chat.ID, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
@@ -324,16 +344,10 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		reply = helpText()
 	case "/qildim":
 		reply = b.logCommand(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
-	case "/bugun":
-		reply = b.todayReport(cctx)
-	case "/sprint":
-		reply = b.sprintCommand(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	case "/ball":
 		reply = b.scoreCommand(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	case "/kitob":
 		reply = b.bookCommand(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
-	case "/kitoblar":
-		reply = b.booksReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	case "/status":
 		reply = b.statusReport(cctx)
 	case "/invitations":
@@ -367,13 +381,14 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 func commandMenu() []botCommand {
 	return []botCommand{
 		{Command: "qildim", Description: "Ingliz: /qildim 45 w essay"},
-		{Command: "bugun", Description: "Bugungi ingliz, streak va sprint"},
+		{Command: "bugun", Description: "Bugungi ingliz va sprint holati"},
 		{Command: "sprint", Description: "Joriy sprint yoki yangisini ochish"},
 		{Command: "yakun", Description: "Sprintni yopish: natija va oldin/keyin"},
 		{Command: "solishtir", Description: "Birinchi va oxirgi ovozli yozuv"},
 		{Command: "ball", Description: "IELTS ball: /ball 6.0 L6.5 W5.5"},
 		{Command: "kitob", Description: "Kitob: /kitob 40 120-bet"},
 		{Command: "kitoblar", Description: "O'qish statistikasi"},
+		{Command: "hujjat", Description: "Reja, manbalar, qo'llanma"},
 		{Command: "balans", Description: "Qo'limda qancha bor; /balans 25mln - tekshirish"},
 		{Command: "hisob", Description: "Pul: shu oy kirim, sarf, qoldi"},
 		{Command: "qarzlar", Description: "Kim kimga qarzdor"},
@@ -432,6 +447,14 @@ func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
 			redraw = r
 		}
 
+	case "gso":
+		// The closing question of a sprint: done, partial or missed.
+		var r redrawFunc
+		notice, r = b.sprintOutcome(cctx, arg)
+		if r != nil {
+			redraw = r
+		}
+
 	case "mute":
 		notice = b.muteError(cctx, arg)
 		redraw = b.errorsList
@@ -486,15 +509,18 @@ func helpText() string {
 		"<b>O'sish — ingliz tili</b>",
 		"/qildim 45 w essay — writing · s speaking · l · r · v · g · m",
 		"🎙 ovozli xabar — speaking sifatida saqlanadi",
-		"/bugun — bugungi daqiqalar, minimum, streak",
+		"/bugun — bugungi daqiqalar va sprint holati",
 		"/sprint — joriy sprint · /sprint &lt;natija&gt; — yangisi",
-		"/yakun — sprintni yopish, oldin/keyin yozuvlari",
+		"/yakun — sprintni yopish: natija, oldin/keyin, «erishdimmi?»",
 		"/solishtir — birinchi va oxirgi yozuv · /ball 6.0 L6.5 — ball",
 		"",
 		"<b>Kitoblar</b>",
 		"/kitob yangi Nomi - Muallif 320 bet",
 		"/kitob 40 120-bet — o'qidim · /kitob tugatdim",
 		"/kitoblar — statistika",
+		"",
+		"<b>Hujjatlar</b>",
+		"/hujjat — reja, manbalar, bot qo'llanmasi (Mini App'da ochiladi)",
 		"",
 		"<b>Hisob-kitob</b> — buyruqsiz, shunchaki yozing:",
 		"<code>tushlik 35k</code> · <code>kecha taksi 18000</code>",

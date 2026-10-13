@@ -86,7 +86,8 @@ func TestIntegration_Growth(t *testing.T) {
 	ctx := context.Background()
 	today := dayStart(time.Now())
 
-	// Backfill two met days before today so the streak has something to count.
+	// Backfill a few days before today: they are outside the sprint (which
+	// starts today) and must not leak into its numbers.
 	for i := 1; i <= 4; i++ {
 		d := today.AddDate(0, 0, -i)
 		if _, err := b.pool.Exec(ctx,
@@ -101,10 +102,13 @@ func TestIntegration_Growth(t *testing.T) {
 	mustContain(t, "second sprint refused", b.sprintCommand(ctx, "boshqa"), "Ochiq sprint bor")
 
 	out = b.logCommand(ctx, "10 w essay 1")
-	mustContain(t, "qildim", out, "+10 daq · writing", "essay 1", "minimumgacha 15 daq", "🎯 Sprint")
+	mustContain(t, "qildim", out, "+10 daq · writing", "essay 1", "Bugun: 10 daq", "🎯 Sprint", "1/1 kun ishlandi")
+	if strings.Contains(out, "Streak") || strings.Contains(out, "minimum") {
+		t.Errorf("card still shows streak/minimum:\n%s", out)
+	}
 
 	out = b.logCommand(ctx, "20 s")
-	mustContain(t, "qildim met", out, "minimum ✓")
+	mustContain(t, "qildim 2", out, "Bugun: 30 daq", "Sprintda: 30 daq")
 
 	out = b.logCommand(ctx, "bekor")
 	mustContain(t, "undo", out, "O'chirildi: 20 daq · speaking")
@@ -117,7 +121,7 @@ func TestIntegration_Growth(t *testing.T) {
 	b.recordVoice(ctx, &Voice{FileID: "F2", FileUniqueID: "U2", Duration: 61}, "part 2")
 
 	out = b.todayReport(ctx)
-	mustContain(t, "bugun", out, "10 daq writing", "🎙", "minimumgacha 10 daq", "Streak: 3 kun")
+	mustContain(t, "bugun", out, "10 daq writing", "🎙", "Bugun: 15 daq", "Sprintda: 15 daq")
 
 	st, err := b.growthNow(ctx, time.Now())
 	if err != nil {
@@ -126,8 +130,8 @@ func TestIntegration_Growth(t *testing.T) {
 	if st.todayMinutes != 10+3+2 {
 		t.Errorf("todayMinutes = %d", st.todayMinutes)
 	}
-	if st.streak < 1 {
-		t.Errorf("streak = %d", st.streak)
+	if st.sprintMinutes != 15 || st.activeDays != 1 {
+		t.Errorf("sprint progress = %d min, %d days (backfilled days leaked in?)", st.sprintMinutes, st.activeDays)
 	}
 
 	mustContain(t, "ball", b.scoreCommand(ctx, "5.5 L6 R6 W5 S5 mock baza"), "5.5", "L6.0", "W5.0")
@@ -138,7 +142,7 @@ func TestIntegration_Growth(t *testing.T) {
 
 	// Nudge: the payload renders, and the dedupe key holds it to one per day.
 	for i := 0; i < 2; i++ {
-		b.queueScheduled(ctx, "growth.nudge", map[string]any{"today_minutes": 0, "missed_yesterday": true},
+		b.queueScheduled(ctx, "growth.nudge", map[string]any{"sprint_goal": "x"},
 			sevInfo, "growth-nudge:test", time.Time{})
 	}
 	var n int
@@ -149,7 +153,7 @@ func TestIntegration_Growth(t *testing.T) {
 	if s := b.growthDailySection(ctx); !strings.Contains(s, "O'sish") {
 		t.Errorf("daily section empty: %q", s)
 	}
-	if s := b.growthWeeklySection(ctx); !strings.Contains(s, "minimum") {
+	if s := b.growthWeeklySection(ctx); !strings.Contains(s, "Ingliz:") {
 		t.Errorf("weekly section: %q", s)
 	}
 
@@ -166,7 +170,30 @@ func TestIntegration_Growth(t *testing.T) {
 			}
 		}
 	}
-	mustContain(t, "yakun", summary, "Minimum bajarilgan kunlar", "Yozuvlar: 2", "yaxshi hafta", "Ballar")
+	mustContain(t, "yakun", summary, "Ishlangan kunlar: 1/", "Yozuvlar: 2", "yaxshi hafta", "Ballar")
+
+	// The closing question comes last, with three answers.
+	var question map[string]any
+	for _, c := range calls() {
+		if txt, _ := c.body["text"].(string); strings.Contains(txt, "Natijaga erishdingizmi") {
+			question = c.body
+		}
+	}
+	if question == nil || question["reply_markup"] == nil {
+		t.Fatal("no outcome question with buttons")
+	}
+	var sprintID string
+	if err := b.pool.QueryRow(ctx, `SELECT id::text FROM growth_sprints`).Scan(&sprintID); err != nil {
+		t.Fatal(err)
+	}
+	notice, redraw := b.sprintOutcome(ctx, "partial:"+sprintID)
+	if notice != growth.Outcomes["partial"] || redraw == nil {
+		t.Errorf("outcome notice = %q", notice)
+	}
+	var outcome string
+	if err := b.pool.QueryRow(ctx, `SELECT outcome FROM growth_sprints`).Scan(&outcome); err != nil || outcome != "partial" {
+		t.Errorf("outcome = %q (%v)", outcome, err)
+	}
 	if len(voices) != 2 || voices[0] != "F1" || voices[1] != "F2" {
 		t.Errorf("voices = %v, want [F1 F2]", voices)
 	}

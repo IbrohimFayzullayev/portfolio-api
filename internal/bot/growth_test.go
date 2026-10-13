@@ -7,23 +7,18 @@ import (
 
 func TestRenderGrowthNudge(t *testing.T) {
 	b := &Bot{}
-	render := func(p map[string]any) string {
-		return b.renderNotification(notification{kind: "growth.nudge", payload: p})
-	}
-
-	if got := render(map[string]any{"today_minutes": float64(0)}); !strings.Contains(got, "hali nol") {
-		t.Errorf("zero day: %q", got)
-	}
-	if got := render(map[string]any{"today_minutes": float64(10)}); !strings.Contains(got, "15 daqiqa qoldi") {
-		t.Errorf("partial day: %q", got)
-	}
-	got := render(map[string]any{
-		"today_minutes": float64(0), "missed_yesterday": true,
-		"streak": float64(4), "sprint_goal": "5 ta <essay>",
-	})
-	for _, want := range []string{"ikkinchisi bo'lmasin", "Streak: 4", "5 ta &lt;essay&gt;"} {
+	got := b.renderNotification(notification{kind: "growth.nudge", payload: map[string]any{
+		"sprint_goal": "5 ta <essay>", "sprint_day": float64(3),
+		"sprint_total": float64(6), "sprint_minutes": float64(95),
+	}})
+	for _, want := range []string{"hali tegilmadi", "5 ta &lt;essay&gt;", "Kun 3/6", "1 s 35 daq"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("missed day: missing %q in %q", want, got)
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+	for _, unwanted := range []string{"Streak", "minimum"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("reminder still talks about %q: %q", unwanted, got)
 		}
 	}
 }
@@ -47,5 +42,26 @@ func TestPickBook(t *testing.T) {
 	}
 	if _, msg := pickBook(nil, ""); !strings.Contains(msg, "yo'q") {
 		t.Errorf("none: %q", msg)
+	}
+}
+
+func TestSplitTextAndTabURL(t *testing.T) {
+	text := strings.Repeat("| a | b |\n", 500)
+	chunks := splitText(text, 1000)
+	if strings.Join(chunks, "") != text {
+		t.Fatal("splitText lost text")
+	}
+	for _, c := range chunks {
+		if len(c) > 1000 || !strings.HasSuffix(c, "\n") {
+			t.Fatalf("chunk breaks a line or is too long: %d", len(c))
+		}
+	}
+
+	b := &Bot{cfg: Config{AdminSiteURL: "https://admin.example.com/"}}
+	if got := b.tabURL("notes", "reja"); got != "https://admin.example.com/tg?doc=reja&tab=notes" {
+		t.Errorf("tabURL = %q", got)
+	}
+	if (&Bot{cfg: Config{AdminSiteURL: "http://localhost:3001"}}).tabKeyboard("growth", "x") != nil {
+		t.Error("a non-https Mini App URL must not produce a button")
 	}
 }

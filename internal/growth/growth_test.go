@@ -50,75 +50,14 @@ func TestParseLog(t *testing.T) {
 	}
 }
 
-func TestStreak(t *testing.T) {
-	met, miss := MinDailyMinutes, 5
-
-	tests := []struct {
-		name       string
-		days       map[int]int // day of October → minutes
-		today      int
-		first      int
-		wantStreak int
-		wantMissed bool
-	}{
-		{
-			name:  "three met days, today not yet",
-			days:  map[int]int{12: met, 13: met, 14: met},
-			today: 15, first: 12, wantStreak: 3,
-		},
-		{
-			name:  "today met adds one",
-			days:  map[int]int{12: met, 13: met, 14: met},
-			today: 14, first: 12, wantStreak: 3,
-		},
-		{
-			name:  "one missed day is forgiven, not counted",
-			days:  map[int]int{12: met, 13: miss, 14: met},
-			today: 15, first: 12, wantStreak: 2,
-		},
-		{
-			name:  "two missed days in a row end it",
-			days:  map[int]int{12: met, 13: met, 14: miss, 15: 0},
-			today: 16, first: 12, wantStreak: 0, wantMissed: true,
-		},
-		{
-			name:  "yesterday missed is reported",
-			days:  map[int]int{12: met, 13: met},
-			today: 15, first: 12, wantStreak: 2, wantMissed: true,
-		},
-		{
-			name:  "sunday is skipped both ways",
-			days:  map[int]int{16: met, 17: met, 19: met}, // 18 = Sunday, nothing logged
-			today: 20, first: 16, wantStreak: 3,
-		},
-		{
-			name:  "monday after a rest sunday looks at saturday",
-			days:  map[int]int{17: miss},
-			today: 19, first: 16, wantStreak: 0, wantMissed: true,
-		},
-		{
-			name:  "days before the first log are not misses",
-			days:  map[int]int{14: met},
-			today: 15, first: 14, wantStreak: 1,
-		},
-		{
-			name:  "restarting after a broken streak",
-			days:  map[int]int{12: met, 13: 0, 14: 0, 15: met},
-			today: 15, first: 12, wantStreak: 1, wantMissed: true,
-		},
+func TestActiveDays(t *testing.T) {
+	m := map[string]int{}
+	for d, v := range map[int]int{12: 30, 13: 5, 15: 40, 18: 60} { // 18 = Sunday
+		m[DayKey(day(d))] = v
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			m := map[string]int{}
-			for d, v := range tc.days {
-				m[DayKey(day(d))] = v
-			}
-			streak, missed := Streak(m, day(tc.today).Add(14*time.Hour), day(tc.first))
-			if streak != tc.wantStreak || missed != tc.wantMissed {
-				t.Fatalf("Streak = %d, missedYesterday = %v; want %d, %v",
-					streak, missed, tc.wantStreak, tc.wantMissed)
-			}
-		})
+	active, working := ActiveDays(m, day(12), day(18))
+	if active != 3 || working != 6 {
+		t.Fatalf("ActiveDays = %d/%d, want 3/6 (Sunday neither counts nor is counted)", active, working)
 	}
 }
 
@@ -162,23 +101,19 @@ func TestSprintDay(t *testing.T) {
 func TestNudgeDue(t *testing.T) {
 	at := func(d, h, m int) time.Time { return time.Date(2026, 10, d, h, m, 0, 0, tz) }
 	tests := []struct {
-		name   string
-		now    time.Time
-		today  int
-		missed bool
-		want   bool
+		name  string
+		now   time.Time
+		today int
+		want  bool
 	}{
-		{"20:59 too early", at(14, 20, 59), 0, false, false},
-		{"21:00 due", at(14, 21, 0), 0, false, true},
-		{"partly done still due", at(14, 21, 30), 10, false, true},
-		{"minimum met, quiet", at(14, 21, 30), 25, false, false},
-		{"missed yesterday: 19:30", at(14, 19, 30), 0, true, true},
-		{"missed yesterday: 19:29 too early", at(14, 19, 29), 0, true, false},
-		{"23:00 is quiet hours", at(14, 23, 0), 0, false, false},
-		{"sunday never", at(18, 21, 30), 0, true, false},
+		{"20:59 too early", at(14, 20, 59), 0, false},
+		{"21:00 due", at(14, 21, 0), 0, true},
+		{"anything logged cancels it", at(14, 21, 30), 5, false},
+		{"23:00 is quiet hours", at(14, 23, 0), 0, false},
+		{"sunday never", at(18, 21, 30), 0, false},
 	}
 	for _, tc := range tests {
-		if got := NudgeDue(tc.now, tc.today, tc.missed); got != tc.want {
+		if got := NudgeDue(tc.now, tc.today); got != tc.want {
 			t.Errorf("%s: got %v", tc.name, got)
 		}
 	}

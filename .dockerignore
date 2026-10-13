@@ -8,3 +8,5 @@ bin
 deploy
 docker-compose.yml
 /api
+# Personal notes are embedded into the binary (notes/notes.go).
+!notes/*.md

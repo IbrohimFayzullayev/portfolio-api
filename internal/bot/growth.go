@@ -14,11 +14,15 @@ import (
 //
 // The point of this file is to make progress that is otherwise invisible
 // visible. Code gives a result the same evening; a language does not. So every
-// session is one line (/qildim 45 w), every voice message is kept, the evening
-// asks once if the day is still empty, and a sprint ends by playing the first
-// and last recording back to back.
+// session is one line (/qildim 45 w), every voice message is kept, and a
+// sprint ends by playing the first and last recording back to back and asking
+// one honest question: did the result happen?
 //
-// The rules themselves — what counts, how a streak survives, when to nudge —
+// There is no streak and no daily quota on purpose. Both reward showing up
+// rather than learning, and turn the work into a checklist. The sprint's one
+// sentence is the only target.
+//
+// The rules themselves — sprint windows, active days, when to remind —
 // live in internal/growth and are tested there. This is the glue.
 
 const dateFmt = "2006-01-02"
@@ -33,11 +37,13 @@ type sprintRow struct {
 }
 
 type growthState struct {
-	hasAny          bool
-	todayMinutes    int
-	streak          int
-	missedYesterday bool
-	sprint          *sprintRow
+	hasAny       bool
+	todayMinutes int
+	sprint       *sprintRow
+	// Inside the open sprint, up to today.
+	sprintMinutes int
+	activeDays    int
+	workingDays   int
 }
 
 // tashkentDay turns a DATE read from PostgreSQL (midnight UTC) into the same
@@ -87,37 +93,38 @@ func (b *Bot) openSprint(ctx context.Context) (*sprintRow, error) {
 	return &sp, nil
 }
 
-// growthNow reads everything the cards and the nudge need in one place.
+// growthNow reads everything the cards and the reminder need in one place.
 func (b *Bot) growthNow(ctx context.Context, now time.Time) (growthState, error) {
 	var st growthState
 	today := dayStart(now)
 
-	var first *time.Time
-	if err := b.pool.QueryRow(ctx, `SELECT min(day) FROM growth_logs`).Scan(&first); err != nil {
+	if err := b.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM growth_logs),
+		       COALESCE((SELECT sum(minutes) FROM growth_logs WHERE day = $1::date), 0)::int`,
+		today.Format(dateFmt)).Scan(&st.hasAny, &st.todayMinutes); err != nil {
 		return st, err
-	}
-	if first != nil {
-		st.hasAny = true
-		firstDay := tashkentDay(*first)
-		// A year back is far longer than any streak this will ever see broken
-		// by the two-miss rule; it only bounds the query.
-		from := today.AddDate(-1, 0, 0)
-		if firstDay.After(from) {
-			from = firstDay
-		}
-		days, err := b.minutesByDay(ctx, from)
-		if err != nil {
-			return st, err
-		}
-		st.todayMinutes = days[today.Format(dateFmt)]
-		st.streak, st.missedYesterday = growth.Streak(days, today, firstDay)
 	}
 
 	sp, err := b.openSprint(ctx)
-	if err != nil {
+	if err != nil || sp == nil {
 		return st, err
 	}
 	st.sprint = sp
+
+	end := sp.ends
+	if today.Before(end) {
+		end = today
+	}
+	if !end.Before(sp.starts) {
+		days, err := b.minutesByDay(ctx, sp.starts)
+		if err != nil {
+			return st, err
+		}
+		for d := sp.starts; !d.After(end); d = d.AddDate(0, 0, 1) {
+			st.sprintMinutes += days[d.Format(dateFmt)]
+		}
+		st.activeDays, st.workingDays = growth.ActiveDays(days, sp.starts, end)
+	}
 	return st, nil
 }
 
@@ -133,26 +140,23 @@ func sprintLine(sp *sprintRow, today time.Time) string {
 	return fmt.Sprintf("🎯 Sprint · %s — «%s»", when, escapeHTML(truncate(sp.goal, 80)))
 }
 
-func minimumMark(minutes int) string {
-	if growth.DayMet(minutes) {
-		return "minimum ✓"
-	}
-	return fmt.Sprintf("minimumgacha %d daq", growth.MinDailyMinutes-minutes)
-}
-
-// statusLines is the tail every growth card ends with.
+// statusLines is the tail every growth card ends with: today, and where the
+// sprint stands. No quota, no streak — the sprint's sentence is the target.
 func statusLines(st growthState, today time.Time) string {
 	var sb strings.Builder
+	label := "Bugun"
 	if growth.IsRestDay(today) {
-		sb.WriteString(fmt.Sprintf("Bugun: %s · dam kuni\n", growth.FormatMinutes(st.todayMinutes)))
-	} else {
-		sb.WriteString(fmt.Sprintf("Bugun: %s · %s\n", growth.FormatMinutes(st.todayMinutes), minimumMark(st.todayMinutes)))
+		label = "Bugun (dam kuni)"
 	}
-	if st.streak > 0 {
-		sb.WriteString(fmt.Sprintf("🔥 Streak: %d kun\n", st.streak))
-	}
+	sb.WriteString(fmt.Sprintf("%s: %s\n", label, growth.FormatMinutes(st.todayMinutes)))
 	if line := sprintLine(st.sprint, today); line != "" {
 		sb.WriteString(line + "\n")
+		if st.workingDays > 0 {
+			sb.WriteString(fmt.Sprintf("Sprintda: %s · %d/%d kun ishlandi\n",
+				growth.FormatMinutes(st.sprintMinutes), st.activeDays, st.workingDays))
+		}
+	} else {
+		sb.WriteString("<i>Ochiq sprint yo'q — /sprint</i>\n")
 	}
 	return sb.String()
 }
@@ -395,15 +399,14 @@ func (b *Bot) sprintCommand(ctx context.Context, args string) string {
 		return "❌ Saqlanmadi: " + escapeHTML(shortError(err))
 	}
 	_, total := growth.SprintDay(start, end, start)
-	return fmt.Sprintf("🎯 <b>Sprint ochildi</b>\n\n«%s»\n\n%s – %s · %d ish kuni\nKunlik minimum: %d daq. Shanba — natija kuni, /yakun.",
-		escapeHTML(goal), start.Format("02.01"), end.Format("02.01"), total, growth.MinDailyMinutes)
+	return fmt.Sprintf("🎯 <b>Sprint ochildi</b>\n\n«%s»\n\n%s – %s · %d ish kuni\nShanba — natija kuni: /yakun, keyin «natijaga erishdimmi?» degan bitta savol.",
+		escapeHTML(goal), start.Format("02.01"), end.Format("02.01"), total)
 }
 
-// sprintTotals is what a sprint produced, read from the date range.
 type sprintTotals struct {
 	byKind     map[string]int
 	total      int
-	daysMet    int
+	activeDays int
 	workDays   int
 	recordings int
 }
@@ -443,14 +446,8 @@ func (b *Bot) sprintTotals(ctx context.Context, sp *sprintRow, upTo time.Time) (
 	if err != nil {
 		return t, err
 	}
-	for d := sp.starts; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if growth.IsRestDay(d) {
-			continue
-		}
-		t.workDays++
-		if growth.DayMet(days[d.Format(dateFmt)]) {
-			t.daysMet++
-		}
+	if !end.Before(sp.starts) {
+		t.activeDays, t.workDays = growth.ActiveDays(days, sp.starts, end)
 	}
 
 	err = b.pool.QueryRow(ctx, `
@@ -481,7 +478,7 @@ func (b *Bot) sprintReport(ctx context.Context, sp *sprintRow, now time.Time) st
 	sb.WriteString(fmt.Sprintf("🎯 <b>Sprint</b> — «%s»\n", escapeHTML(sp.goal)))
 	sb.WriteString(fmt.Sprintf("%s – %s\n\n", sp.starts.Format("02.01"), sp.ends.Format("02.01")))
 	n, total := growth.SprintDay(sp.starts, sp.ends, today)
-	sb.WriteString(fmt.Sprintf("Kun: %d/%d · minimum bajarilgan: %d/%d\n", n, total, t.daysMet, t.workDays))
+	sb.WriteString(fmt.Sprintf("Kun: %d/%d · ishlangan kunlar: %d/%d\n", n, total, t.activeDays, t.workDays))
 	sb.WriteString(fmt.Sprintf("Jami: %s\n", growth.FormatMinutes(t.total)))
 	if br := kindBreakdown(t.byKind); br != "" {
 		sb.WriteString(br + "\n")
@@ -580,8 +577,7 @@ func (b *Bot) closeSprint(ctx context.Context, chatID int64, note string) {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("🏁 <b>Sprint yopildi</b>\n\n«%s»\n%s – %s\n\n",
 		escapeHTML(sp.goal), sp.starts.Format("02.01"), sp.ends.Format("02.01")))
-	sb.WriteString(fmt.Sprintf("Minimum bajarilgan kunlar: <b>%d/%d</b>\n", t.daysMet, t.workDays))
-	sb.WriteString(fmt.Sprintf("Jami: %s\n", growth.FormatMinutes(t.total)))
+	sb.WriteString(fmt.Sprintf("Ishlangan kunlar: %d/%d · jami %s\n", t.activeDays, t.workDays, growth.FormatMinutes(t.total)))
 	if br := kindBreakdown(t.byKind); br != "" {
 		sb.WriteString(br + "\n")
 	}
@@ -592,17 +588,55 @@ func (b *Bot) closeSprint(ctx context.Context, chatID int64, note string) {
 	if n := strings.TrimSpace(note); n != "" {
 		sb.WriteString("\n📝 " + escapeHTML(n) + "\n")
 	}
-	sb.WriteString("\nDam oling. Keyingisi: <code>/sprint natija jumlasi</code>")
 	b.reply(ctx, chatID, sb.String())
 
 	first, last, err := b.firstAndLast(ctx, &sp.starts, &sp.ends)
 	if err != nil {
 		log.Printf("bot: could not read recordings: %v", err)
-		return
-	}
-	if msg := b.playBeforeAfter(ctx, chatID, first, last); msg != "" {
+	} else if msg := b.playBeforeAfter(ctx, chatID, first, last); msg != "" {
 		b.reply(ctx, chatID, msg)
 	}
+
+	// The one question that matters, asked last — after the numbers and the
+	// recordings, so the answer is given with the evidence in front of you.
+	if err := b.tg.sendMessageMarkup(ctx, chatID, outcomeQuestion(sp.goal), outcomeKeyboard(sp.id)); err != nil {
+		log.Printf("bot: outcome question failed: %v", err)
+	}
+}
+
+func outcomeQuestion(goal string) string {
+	return fmt.Sprintf("❓ <b>Natijaga erishdingizmi?</b>\n\n«%s»\n\n<i>Daqiqalar emas — shu jumla bajarildimi?</i>", escapeHTML(goal))
+}
+
+func outcomeKeyboard(sprintID string) *inlineKeyboard {
+	return &inlineKeyboard{InlineKeyboard: [][]inlineButton{{
+		{Text: "✅ Ha", CallbackData: "gso:done:" + sprintID},
+		{Text: "🟡 Qisman", CallbackData: "gso:partial:" + sprintID},
+		{Text: "❌ Yo'q", CallbackData: "gso:missed:" + sprintID},
+	}}}
+}
+
+// sprintOutcome records the answer to the closing question and redraws the
+// question as the answer, so the chat keeps a record without the buttons.
+func (b *Bot) sprintOutcome(ctx context.Context, arg string) (string, redrawFunc) {
+	outcome, id, _ := strings.Cut(arg, ":")
+	label, ok := growth.Outcomes[outcome]
+	if !ok {
+		return "Noma'lum javob", nil
+	}
+	var goal string
+	err := b.pool.QueryRow(ctx, `
+		UPDATE growth_sprints SET outcome = $2
+		WHERE id = $1::uuid AND closed_at IS NOT NULL
+		RETURNING goal`, id, outcome).Scan(&goal)
+	if err != nil {
+		return "Saqlanmadi", nil
+	}
+	text := fmt.Sprintf("%s\n\n«%s»\n\nKeyingisi: <code>/sprint natija jumlasi</code>", label, escapeHTML(goal))
+	if outcome != "done" {
+		text += "\n<i>Nima to'sqinlik qildi? Keyingi sprint jumlasini shunga qarab yozing.</i>"
+	}
+	return label, func(context.Context) (string, *inlineKeyboard) { return text, nil }
 }
 
 // compareCommand is /solishtir: the open sprint's first and last recording, or
@@ -761,14 +795,14 @@ func (b *Bot) scoresBetween(ctx context.Context, from, to time.Time) string {
 
 /* --------------------------------- nudge ---------------------------------- */
 
-// scheduleGrowthNudge runs every minute from the scheduler. It does nothing
-// until the evening, and then queues at most one row per day — and only while
-// the day is still short, so writing the work down at 20:55 cancels the 21:00
-// message by never creating it.
+// scheduleGrowthNudge runs every minute from the scheduler. It only ever
+// speaks inside an open sprint, on a working day where nothing has been
+// written down by 21:00 — one row per day at most, and none at all if the
+// work is logged first.
 func (b *Bot) scheduleGrowthNudge(ctx context.Context) {
 	now := time.Now().In(tashkent)
 	// Cheap exit for most of the day, before any query.
-	if now.Hour() < 19 || now.Hour() >= 23 || growth.IsRestDay(now) {
+	if now.Hour() < 21 || now.Hour() >= 23 || growth.IsRestDay(now) {
 		return
 	}
 
@@ -777,55 +811,34 @@ func (b *Bot) scheduleGrowthNudge(ctx context.Context) {
 		log.Printf("bot: growth nudge: %v", err)
 		return
 	}
-	// Nothing ever logged: the habit has not started, and a reminder about a
-	// habit that does not exist yet is noise.
-	if !st.hasAny {
+	today := dayStart(now)
+	if st.sprint == nil || today.Before(st.sprint.starts) || today.After(st.sprint.ends) {
 		return
 	}
-	if !growth.NudgeDue(now, st.todayMinutes, st.missedYesterday) {
+	if !growth.NudgeDue(now, st.todayMinutes) {
 		return
 	}
 
-	payload := map[string]any{
-		"today_minutes":    st.todayMinutes,
-		"missed_yesterday": st.missedYesterday,
-		"streak":           st.streak,
-	}
-	if st.sprint != nil {
-		payload["sprint_goal"] = st.sprint.goal
-	}
-	b.queueScheduled(ctx, "growth.nudge", payload, sevInfo,
-		"growth-nudge:"+now.Format(dateFmt), time.Time{})
+	n, total := growth.SprintDay(st.sprint.starts, st.sprint.ends, today)
+	b.queueScheduled(ctx, "growth.nudge", map[string]any{
+		"sprint_goal":    st.sprint.goal,
+		"sprint_day":     n,
+		"sprint_total":   total,
+		"sprint_minutes": st.sprintMinutes,
+	}, sevInfo, "growth-nudge:"+now.Format(dateFmt), time.Time{})
 }
 
 func renderGrowthNudge(p map[string]any) string {
-	today := int(num(p, "today_minutes"))
-	missed, _ := p["missed_yesterday"].(bool)
-	streak := num(p, "streak")
-
 	var sb strings.Builder
-	switch {
-	case missed:
-		sb.WriteString("⚠️ <b>Kecha o'tib ketdi — bugun ikkinchisi bo'lmasin.</b>\n")
-		if today > 0 {
-			sb.WriteString(fmt.Sprintf("\nBugun %s. Yana %d daqiqa yetadi.\n",
-				growth.FormatMinutes(today), growth.MinDailyMinutes-today))
-		} else {
-			sb.WriteString(fmt.Sprintf("\n%d daqiqa yetadi: 1 ta writing paragraf + 2 daqiqalik ovoz.\n", growth.MinDailyMinutes))
-		}
-	case today > 0:
-		sb.WriteString(fmt.Sprintf("⏰ Bugun %s. Minimumgacha %d daqiqa qoldi.\n",
-			growth.FormatMinutes(today), growth.MinDailyMinutes-today))
-	default:
-		sb.WriteString(fmt.Sprintf("⏰ <b>Bugun hali nol.</b>\n\nMinimum — %d daqiqa: 1 ta writing paragraf + 2 daqiqalik ovoz.\n", growth.MinDailyMinutes))
-	}
-	if streak > 0 {
-		sb.WriteString(fmt.Sprintf("🔥 Streak: %d kun\n", streak))
-	}
+	sb.WriteString("🎯 <b>Bugun sprintga hali tegilmadi.</b>\n")
 	if goal := str(p, "sprint_goal"); goal != "" {
-		sb.WriteString("🎯 «" + escapeHTML(truncate(goal, 80)) + "»\n")
+		sb.WriteString("\n«" + escapeHTML(truncate(goal, 120)) + "»\n")
 	}
-	sb.WriteString("\n<code>/qildim 25 w</code> · 🎙 ovozli xabar")
+	if total := num(p, "sprint_total"); total > 0 {
+		sb.WriteString(fmt.Sprintf("Kun %d/%d · sprintda hozircha %s\n",
+			num(p, "sprint_day"), total, growth.FormatMinutes(int(num(p, "sprint_minutes")))))
+	}
+	sb.WriteString("\nShu natijaga bir qadam: bitta paragraf, bitta yozuv yoki bitta test qismi.\n<code>/qildim 30 w</code> · 🎙 ovozli xabar")
 	return sb.String()
 }
 
@@ -855,34 +868,24 @@ func (b *Bot) growthDailySection(ctx context.Context) string {
 		if err != nil {
 			return ""
 		}
-		y := days[yesterday.Format(dateFmt)]
-		switch {
-		case growth.IsRestDay(yesterday):
-			sb.WriteString(fmt.Sprintf("Kecha: dam kuni · %s\n", growth.FormatMinutes(y)))
-		case growth.DayMet(y):
-			sb.WriteString(fmt.Sprintf("Kecha: %s ✓", growth.FormatMinutes(y)))
-		default:
-			sb.WriteString(fmt.Sprintf("Kecha: %s ✗", growth.FormatMinutes(y)))
-		}
-		if !growth.IsRestDay(yesterday) {
-			if st.streak > 0 {
-				sb.WriteString(fmt.Sprintf(" · 🔥 %d kun", st.streak))
-			}
-			sb.WriteString("\n")
-		}
-		if st.missedYesterday && !growth.IsRestDay(today) {
-			sb.WriteString("⚠️ Bugun ikkinchi nol bo'lmasin.\n")
-		}
+		sb.WriteString(fmt.Sprintf("Kecha: %s\n", growth.FormatMinutes(days[yesterday.Format(dateFmt)])))
 	}
 	if line := sprintLine(st.sprint, today); line != "" {
 		sb.WriteString(line + "\n")
+		if st.workingDays > 0 {
+			sb.WriteString(fmt.Sprintf("Sprintda: %s · %d/%d kun ishlandi\n",
+				growth.FormatMinutes(st.sprintMinutes), st.activeDays, st.workingDays))
+		}
+		if !today.Before(st.sprint.ends) {
+			sb.WriteString("🏁 Bugun natija kuni — /yakun\n")
+		}
 	}
 	sb.WriteString(books)
 	return sb.String()
 }
 
 // growthWeeklySection goes into the Sunday evening report: the week's English
-// by kind, the days that counted, and the reading.
+// by kind, how many days had any, and the reading.
 func (b *Bot) growthWeeklySection(ctx context.Context) string {
 	today := dayStart(time.Now())
 	from := today.AddDate(0, 0, -6)
@@ -903,22 +906,14 @@ func (b *Bot) growthWeeklySection(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("\n📈 <b>O'sish — hafta</b>\n")
 	if total > 0 {
-		met, work := 0, 0
+		active, work := growth.ActiveDays(days, from, today)
 		var bars []int
 		var labels strings.Builder
 		for d := from; !d.After(today); d = d.AddDate(0, 0, 1) {
-			m := days[d.Format(dateFmt)]
-			bars = append(bars, m)
+			bars = append(bars, days[d.Format(dateFmt)])
 			labels.WriteString(growth.WeekdayShort(d.Weekday())[:1])
-			if growth.IsRestDay(d) {
-				continue
-			}
-			work++
-			if growth.DayMet(m) {
-				met++
-			}
 		}
-		sb.WriteString(fmt.Sprintf("Ingliz: %s · minimum %d/%d kun\n", growth.FormatMinutes(total), met, work))
+		sb.WriteString(fmt.Sprintf("Ingliz: %s · %d/%d kun\n", growth.FormatMinutes(total), active, work))
 		sb.WriteString(fmt.Sprintf("<code>%s</code>\n<code>%s</code>\n", growth.Sparkline(bars), labels.String()))
 
 		byKind := map[string]int{}

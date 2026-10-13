@@ -159,6 +159,19 @@ func (s *Server) routes() *chi.Mux {
 			})
 		})
 
+		// English practice and books (written by the bot), and the personal
+		// reference notes. Read-only, for the dashboard and the Mini App.
+		r.Route("/growth", func(r chi.Router) {
+			r.Use(s.adminOrViewer)
+			r.Get("/summary", s.handleGrowthSummary)
+			r.Get("/books", s.handleBooksSummary)
+		})
+		r.Route("/notes", func(r chi.Router) {
+			r.Use(s.adminOrViewer)
+			r.Get("/", s.handleListNotes)
+			r.Get("/{slug}", s.handleGetNote)
+		})
+
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware)
 

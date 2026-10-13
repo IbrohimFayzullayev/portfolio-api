@@ -140,6 +140,7 @@ type GrowthSprint struct {
 	ResultNote string     `json:"result_note"`
 	ClosedAt   *time.Time `json:"closed_at"`
 	CreatedAt  time.Time  `json:"created_at"`
+	Outcome    *string    `json:"outcome"`
 }
 
 type HealthCheck struct {

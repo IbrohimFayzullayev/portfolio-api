@@ -22,6 +22,9 @@ type Server struct {
 	tokens *auth.TokenManager
 	router *chi.Mux
 
+	// Read-only tokens for the Telegram Mini App (see viewer.go).
+	viewers *auth.ViewerTokens
+
 	// Guards the one public write endpoint (invitation submissions).
 	invLimiter *rateLimiter
 
@@ -43,10 +46,11 @@ type Server struct {
 
 func NewServer(cfg *config.Config, pool *pgxpool.Pool) *Server {
 	s := &Server{
-		cfg:    cfg,
-		pool:   pool,
-		q:      db.New(pool),
-		tokens: auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL),
+		cfg:     cfg,
+		pool:    pool,
+		q:       db.New(pool),
+		tokens:  auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL),
+		viewers: auth.NewViewerTokens(cfg.JWTSecret, viewerTokenTTL),
 		// 10 submissions per IP per hour is far above real use and far below
 		// anything worth calling spam.
 		invLimiter: newRateLimiter(10, time.Hour),
@@ -128,6 +132,28 @@ func (s *Server) routes() *chi.Mux {
 				Post("/contact", s.handleCreateContact)
 			r.With(s.clientErrorLimiter.middleware).
 				Post("/client-errors", s.handleClientError)
+		})
+
+		// The Telegram Mini App signs in with Telegram's init data and gets a
+		// read-only token. Same limiter as password login: both are ways in.
+		r.With(s.authLimiter.middleware).Post("/tg/auth", s.handleTelegramAuth)
+
+		// The money log. Reads are open to the Mini App's viewer token as
+		// well as the admin session; writes are admin only.
+		r.Route("/finance", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(s.adminOrViewer)
+				r.Get("/meta", s.handleFinanceMeta)
+				r.Get("/summary", s.handleFinanceSummary)
+				r.Get("/entries", s.handleListFinanceEntries)
+				r.Get("/debts", s.handleFinanceDebts)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(s.authMiddleware)
+				r.Post("/entries", s.handleCreateFinanceEntry)
+				r.Put("/entries/{id}", s.handleUpdateFinanceEntry)
+				r.Delete("/entries/{id}", s.handleDeleteFinanceEntry)
+			})
 		})
 
 		r.Group(func(r chi.Router) {

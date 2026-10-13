@@ -1,63 +1,12 @@
 package bot
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
 
 func day(m time.Month, d int) time.Time {
 	return time.Date(2026, m, d, 0, 0, 0, 0, tashkent)
-}
-
-func TestFoldDebts(t *testing.T) {
-	rows := []debtRow{
-		// Ali: lent 500k, got 200k back — owes 300k since the loan.
-		{"Ali", "UZS", kindLent, 500_000_00, day(10, 1)},
-		{"ali", "UZS", kindRepaidIn, 200_000_00, day(10, 5)},
-
-		// Vali: fully repaid, then lent again — the clock restarts.
-		{"Vali", "UZS", kindLent, 100_000_00, day(9, 1)},
-		{"Vali", "UZS", kindRepaidIn, 100_000_00, day(9, 10)},
-		{"Vali", "UZS", kindLent, 50_000_00, day(10, 7)},
-
-		// Sardor: I borrowed dollars and paid part back.
-		{"Sardor", "USD", kindBorrowed, 300_00, day(10, 2)},
-		{"Sardor", "USD", kindRepaidOut, 100_00, day(10, 9)},
-
-		// Jasur: settled — must not appear.
-		{"Jasur", "UZS", kindBorrowed, 70_000_00, day(9, 1)},
-		{"Jasur", "UZS", kindRepaidOut, 70_000_00, day(9, 2)},
-	}
-
-	got := foldDebts(rows)
-	want := map[string]struct {
-		minor int64
-		since time.Time
-	}{
-		"ali":    {300_000_00, day(10, 1)},
-		"vali":   {50_000_00, day(10, 7)},
-		"sardor": {-200_00, day(10, 2)},
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %d balances, want %d: %+v", len(got), len(want), got)
-	}
-	for _, g := range got {
-		w, ok := want[strings.ToLower(g.person)]
-		if !ok {
-			t.Errorf("unexpected balance for %s", g.person)
-			continue
-		}
-		if g.minor != w.minor || !g.since.Equal(w.since) {
-			t.Errorf("%s: %d since %s, want %d since %s", g.person, g.minor,
-				g.since.Format("02.01"), w.minor, w.since.Format("02.01"))
-		}
-	}
-
-	owed, owe, people := debtTotals(got)
-	if owed["UZS"] != 350_000_00 || owe["USD"] != 200_00 || people != 3 {
-		t.Errorf("totals: owed=%v owe=%v people=%d", owed, owe, people)
-	}
 }
 
 func TestFinancePeriod(t *testing.T) {

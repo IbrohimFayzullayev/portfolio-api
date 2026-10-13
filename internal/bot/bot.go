@@ -266,6 +266,23 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	case "/oxirgi":
 		b.sendRecentList(cctx, msg.Chat.ID)
 		return
+	case "/hisob", "/qarzlar", "/qarz", "/app":
+		// Money reports carry a button that opens the same numbers as
+		// charts in the Mini App.
+		arg := strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0]))
+		var text string
+		switch cmd {
+		case "/hisob":
+			text = b.financeReport(cctx, arg)
+		case "/app":
+			text = "📊 <b>Hisobotlar</b> — grafiklar, kategoriyalar, qarzlar va tarix."
+		default:
+			text = b.debtsReport(cctx, arg)
+		}
+		if err := b.tg.sendMessageMarkup(cctx, msg.Chat.ID, text, b.webAppKeyboard()); err != nil {
+			log.Printf("bot: sendMessage failed: %v", err)
+		}
+		return
 	case "/tahrir":
 		b.sendEditCard(cctx, msg.Chat.ID,
 			strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
@@ -288,10 +305,6 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		reply = b.invitationsReport(cctx)
 	case "/kunlik":
 		reply = b.dailySummary(cctx)
-	case "/hisob":
-		reply = b.financeReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
-	case "/qarzlar", "/qarz":
-		reply = b.debtsReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	case "/stat":
 		reply = b.statsReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	case "/xato":
@@ -321,6 +334,7 @@ func commandMenu() []botCommand {
 		{Command: "hisob", Description: "Pul: shu oy qayerga ketdi"},
 		{Command: "qarzlar", Description: "Kim kimga qarzdor"},
 		{Command: "oxirgi", Description: "Oxirgi yozuvlar, tuzatish tugmalari bilan"},
+		{Command: "app", Description: "Hisobotlarni grafik bilan ochish"},
 		{Command: "status", Description: "Stack holati va uptime"},
 		{Command: "posts", Description: "Oxirgi postlar, nashr tugmalari bilan"},
 		{Command: "tahrir", Description: "Postni tahrirlash kartasi"},
@@ -433,6 +447,7 @@ func helpText() string {
 		"/hisob [bugun|hafta|oy|o'tgan|yil|sentabr] — qayerga ketdi",
 		"/qarzlar — ochiq qarzlar · /qarzlar Ali — bitta odam",
 		"/oxirgi — oxirgi 10 ta, tuzatish va o'chirish",
+		"/app — hisobotlar grafik bilan (Telegram ichida)",
 		"",
 		"<b>Kontent</b>",
 		"/posts — oxirgi postlar, nashr tugmalari bilan",

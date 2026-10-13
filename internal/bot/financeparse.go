@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/ibrohimcoder/portfolio-api/internal/finance"
 )
 
 // Reading one line of money talk.
@@ -21,132 +23,28 @@ import (
 //
 // Everything in this file is pure: text and today's date in, an entry out.
 
+// The kinds and categories themselves live in internal/finance, shared with
+// the API; these are the short local names the parser and the bot use.
 const (
-	kindExpense   = "expense"
-	kindGift      = "gift"
-	kindLent      = "lent"
-	kindRepaidIn  = "repaid_in"
-	kindBorrowed  = "borrowed"
-	kindRepaidOut = "repaid_out"
+	kindExpense   = finance.KindExpense
+	kindGift      = finance.KindGift
+	kindLent      = finance.KindLent
+	kindRepaidIn  = finance.KindRepaidIn
+	kindBorrowed  = finance.KindBorrowed
+	kindRepaidOut = finance.KindRepaidOut
 )
 
-type kindInfo struct {
-	// One letter, for callback data.
-	code  string
-	emoji string
-	label string
-}
-
-var kinds = map[string]kindInfo{
-	kindExpense:   {"e", "💸", "Xarajat"},
-	kindGift:      {"g", "🎁", "Berdim"},
-	kindLent:      {"l", "🤝", "Qarz berdim"},
-	kindRepaidIn:  {"i", "↩️", "Qarz qaytdi"},
-	kindBorrowed:  {"b", "🫴", "Qarz oldim"},
-	kindRepaidOut: {"o", "↪️", "Qarzni qaytardim"},
-}
-
-// Picker order: the common case first.
-var kindOrder = []string{kindExpense, kindGift, kindLent, kindRepaidIn, kindBorrowed, kindRepaidOut}
-
-func kindByCode(code string) string {
-	for k, v := range kinds {
-		if v.code == code {
-			return k
-		}
-	}
-	return ""
-}
-
-// isDebtKind: the four kinds that move a person's balance.
-func isDebtKind(kind string) bool {
-	switch kind {
-	case kindLent, kindRepaidIn, kindBorrowed, kindRepaidOut:
-		return true
-	}
-	return false
-}
+func isDebtKind(kind string) bool { return finance.IsDebt(kind) }
 
 // needsPerson: an entry of this kind means nothing without a name.
-func needsPerson(kind string) bool { return isDebtKind(kind) }
+func needsPerson(kind string) bool { return finance.IsDebt(kind) }
 
-type category struct {
-	key   string // ASCII only: it goes into callback data
-	emoji string
-	label string
-	stems []string
+func kindOf(key string) finance.Kind {
+	k, _ := finance.KindOf(key)
+	return k
 }
 
-// The guess list. A word matches a stem when it is the stem itself or the
-// stem plus a common suffix ("taksiga", "bozordan"), so "gul" catches
-// "gulga" but not "Gulnora". Order matters only when one message mentions
-// two categories: the first word that matches wins.
-var categories = []category{
-	{"ovqat", "🍽", "Ovqat", []string{
-		"tushlik", "nonushta", "kechki", "ovqat", "kafe", "restoran", "choyxona",
-		"kofe", "coffee", "choy", "osh", "somsa", "lavash", "burger", "shashlik",
-		"fastfud", "fastfood", "pitsa", "pizza", "shirinlik", "muzqaymoq", "tort",
-		"hotdog", "donar", "shaurma", "manti", "chuchvara", "lag'mon", "kabob",
-		"evos", "kfc", "bellissimo", "dostavka",
-	}},
-	{"oziq", "🛒", "Oziq-ovqat", []string{
-		"bozor", "magazin", "market", "supermarket", "korzinka", "makro", "havas",
-		"oziq", "go'sht", "sabzavot", "meva", "sut", "tuxum", "yog'", "non",
-		"guruch", "shakar", "mahsulot", "produkt",
-	}},
-	{"transport", "🚕", "Transport", []string{
-		"taksi", "taxi", "yandex", "mytaxi", "metro", "avtobus", "benzin", "metan",
-		"propan", "zapravka", "parkovka", "moyka", "poyezd", "samolyot", "avia",
-		"yo'lkira", "mashina", "avto", "shina",
-	}},
-	{"texnika", "💻", "Texnika", []string{
-		"noutbuk", "kompyuter", "texnika", "naushnik", "quloqchin", "zaryadka",
-		"kabel", "planshet", "monitor", "klaviatura", "sichqoncha",
-	}},
-	{"uy", "🏠", "Uy", []string{
-		"ijara", "kvartira", "kommunal", "svet", "elektr", "gaz", "uy", "mebel",
-		"remont", "xo'jalik",
-	}},
-	{"aloqa", "📱", "Aloqa va obuna", []string{
-		"telefon", "paynet", "internet", "uzmobile", "beeline", "ucell", "mobiuz",
-		"obuna", "spotify", "youtube", "netflix", "icloud", "chatgpt", "claude",
-		"apple", "google",
-	}},
-	{"kiyim", "👕", "Kiyim", []string{
-		"kiyim", "ko'ylak", "shim", "poyabzal", "krossovka", "kurtka", "futbolka",
-		"kostyum", "sumka", "oyoqkiyim",
-	}},
-	{"salomatlik", "💊", "Salomatlik", []string{
-		"dori", "apteka", "dorixona", "shifokor", "doktor", "vrach", "klinika",
-		"analiz", "stomatolog", "tish", "sport", "zal", "fitnes", "gym",
-	}},
-	{"talim", "📚", "Ta'lim", []string{
-		"kitob", "kurs", "dars", "kontrakt", "repetitor", "udemy",
-	}},
-	{"dam", "🎬", "Dam olish", []string{
-		"kino", "o'yin", "playstation", "konsert", "sayohat", "sayr", "bilet",
-		"mehmonxona", "hotel",
-	}},
-	{"marosim", "🎉", "Marosim va sovg'a", []string{
-		"to'y", "tug'ilgan", "sovg'a", "gul", "marosim", "ehson", "sadaqa",
-		"hadya", "nikoh", "xatna",
-	}},
-	{"ish", "💼", "Ish", []string{
-		"server", "hosting", "domen", "vps", "reklama", "figma", "github", "cursor",
-	}},
-	// Never guessed from words: every debt entry gets it.
-	{"qarz", "🤝", "Qarz", nil},
-	{"boshqa", "📦", "Boshqa", nil},
-}
-
-func categoryByKey(key string) category {
-	for _, c := range categories {
-		if c.key == key {
-			return c
-		}
-	}
-	return categories[len(categories)-1]
-}
+func categoryByKey(key string) finance.Category { return finance.CategoryByKey(key) }
 
 // Suffixes a stem may carry and still count as that word.
 var stemSuffixes = []string{
@@ -173,10 +71,10 @@ func matchesStem(word, stem string) bool {
 }
 
 func categoryOf(word string) string {
-	for _, c := range categories {
-		for _, s := range c.stems {
+	for _, c := range finance.Categories {
+		for _, s := range c.Stems {
 			if matchesStem(word, s) {
-				return c.key
+				return c.Key
 			}
 		}
 	}

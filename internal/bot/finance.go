@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/ibrohimcoder/portfolio-api/internal/finance"
 )
 
 // Personal money log.
@@ -156,13 +158,13 @@ func (b *Bot) recordBatch(ctx context.Context, chatID int64, parts []string, tod
 			spent.add(p.currency, p.amountMinor)
 		}
 
-		label := firstNonEmpty(p.note, p.person, categoryByKey(p.category).label)
+		label := firstNonEmpty(p.note, p.person, categoryByKey(p.category).Label)
 		if isDebtKind(p.kind) {
 			label = p.person
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s <b>%s</b> — %s %s\n", saved, kinds[p.kind].emoji,
+		sb.WriteString(fmt.Sprintf("%d. %s <b>%s</b> — %s %s\n", saved, kindOf(p.kind).Emoji,
 			formatMoney(p.amountMinor, p.currency), escapeHTML(truncate(label, 40)),
-			categoryByKey(p.category).emoji))
+			categoryByKey(p.category).Emoji))
 		if !sameDay(p.spentOn, today) {
 			sb.WriteString("    📅 " + dayLabel(p.spentOn, today) + "\n")
 		}
@@ -243,11 +245,11 @@ func (b *Bot) entryCard(ctx context.Context, id string) (string, *inlineKeyboard
 	}
 
 	today := dayStart(time.Now())
-	k := kinds[e.kind]
+	k := kindOf(e.kind)
 	c := categoryByKey(e.category)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s <b>%s</b> · %s %s\n", k.emoji, k.label, c.emoji, c.label))
+	sb.WriteString(fmt.Sprintf("%s <b>%s</b> · %s %s\n", k.Emoji, k.Label, c.Emoji, c.Label))
 	sb.WriteString("<b>" + formatMoney(e.amountMinor, e.currency) + "</b>")
 	if e.note != "" {
 		sb.WriteString(" — " + escapeHTML(e.note))
@@ -291,12 +293,12 @@ func entryKeyboard(id string) *inlineKeyboard {
 func categoryPicker(e financeEntry) (string, *inlineKeyboard) {
 	var rows [][]inlineButton
 	var row []inlineButton
-	for _, c := range categories {
-		label := c.emoji + " " + c.label
-		if c.key == e.category {
+	for _, c := range finance.Categories {
+		label := c.Emoji + " " + c.Label
+		if c.Key == e.category {
 			label = "• " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: "fc:" + c.key + ":" + e.id})
+		row = append(row, inlineButton{Text: label, CallbackData: "fc:" + c.Key + ":" + e.id})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -315,13 +317,12 @@ func categoryPicker(e financeEntry) (string, *inlineKeyboard) {
 func kindPicker(e financeEntry) (string, *inlineKeyboard) {
 	var rows [][]inlineButton
 	var row []inlineButton
-	for _, kind := range kindOrder {
-		k := kinds[kind]
-		label := k.emoji + " " + k.label
-		if kind == e.kind {
+	for _, k := range finance.Kinds {
+		label := k.Emoji + " " + k.Label
+		if k.Key == e.kind {
 			label = "• " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: "fk:" + k.code + ":" + e.id})
+		row = append(row, inlineButton{Text: label, CallbackData: "fk:" + k.Code + ":" + e.id})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -354,7 +355,7 @@ func (b *Bot) financeCallback(ctx context.Context, chatID int64, action, arg str
 		return b.setCategory(ctx, id, key), b.cardRedraw(id)
 	case "fk":
 		code, id, _ := strings.Cut(arg, ":")
-		return b.setKind(ctx, id, kindByCode(code)), b.cardRedraw(id)
+		return b.setKind(ctx, id, finance.KindByCode(code)), b.cardRedraw(id)
 	}
 
 	op, id, _ := strings.Cut(arg, ":")
@@ -385,7 +386,7 @@ func (b *Bot) financeCallback(ctx context.Context, chatID int64, action, arg str
 		return "", func(context.Context) (string, *inlineKeyboard) {
 			return fmt.Sprintf("🗑 <b>O'chirilsinmi?</b>\n%s — %s · %s",
 					formatMoney(e.amountMinor, e.currency),
-					escapeHTML(firstNonEmpty(e.note, kinds[e.kind].label)),
+					escapeHTML(firstNonEmpty(e.note, kindOf(e.kind).Label)),
 					e.spentOn.Format("02.01")),
 				&inlineKeyboard{InlineKeyboard: [][]inlineButton{{
 					{Text: "Ha, o'chirish", CallbackData: "fn:delok:" + id},
@@ -423,7 +424,7 @@ func (b *Bot) cardRedraw(id string) redrawFunc {
 
 func (b *Bot) setCategory(ctx context.Context, id, key string) string {
 	c := categoryByKey(key)
-	if c.key != key {
+	if c.Key != key {
 		return "Noma'lum kategoriya"
 	}
 	tag, err := b.pool.Exec(ctx, `
@@ -435,11 +436,11 @@ func (b *Bot) setCategory(ctx context.Context, id, key string) string {
 	if tag.RowsAffected() == 0 {
 		return "Yozuv topilmadi"
 	}
-	return c.label
+	return c.Label
 }
 
 func (b *Bot) setKind(ctx context.Context, id, kind string) string {
-	if _, ok := kinds[kind]; !ok {
+	if _, ok := finance.KindOf(kind); !ok {
 		return "Noma'lum tur"
 	}
 	e, err := b.loadEntry(ctx, id)
@@ -471,7 +472,7 @@ func (b *Bot) setKind(ctx context.Context, id, kind string) string {
 	if needsPerson(kind) && e.person == "" {
 		return "Endi 👤 Kim tugmasi bilan ismni yozing"
 	}
-	return kinds[kind].label
+	return kindOf(kind).Label
 }
 
 /* ------------------------- edits by question/answer ------------------------ */
@@ -610,12 +611,12 @@ func (b *Bot) recentList(ctx context.Context) (string, *inlineKeyboard) {
 	var buttons [][]inlineButton
 	var row []inlineButton
 	for i, e := range entries {
-		label := firstNonEmpty(e.note, e.person, categoryByKey(e.category).label)
+		label := firstNonEmpty(e.note, e.person, categoryByKey(e.category).Label)
 		if e.person != "" && e.note != "" && isDebtKind(e.kind) {
 			label = e.person
 		}
 		sb.WriteString(fmt.Sprintf("%d. %s %s <b>%s</b> — %s\n",
-			i+1, e.spentOn.Format("02.01"), kinds[e.kind].emoji,
+			i+1, e.spentOn.Format("02.01"), kindOf(e.kind).Emoji,
 			formatMoney(e.amountMinor, e.currency), escapeHTML(truncate(label, 40))))
 
 		row = append(row, inlineButton{
@@ -673,77 +674,7 @@ func (b *Bot) spentBetween(ctx context.Context, from, to time.Time) (money, int6
 
 /* ------------------------------- balances --------------------------------- */
 
-type debtBalance struct {
-	person   string
-	currency string
-	// Positive: they owe me. Negative: I owe them.
-	minor int64
-	// When the balance last left zero — how long this debt has been open.
-	since time.Time
-}
-
-func signedDebt(kind string, minor int64) int64 {
-	switch kind {
-	case kindLent, kindRepaidOut:
-		return minor
-	case kindRepaidIn, kindBorrowed:
-		return -minor
-	}
-	return 0
-}
-
-type debtRow struct {
-	person   string
-	currency string
-	kind     string
-	minor    int64
-	day      time.Time
-}
-
-// foldDebts walks each person's rows in date order. Kept apart from the query
-// so the arithmetic can be tested without a database.
-func foldDebts(rows []debtRow) []debtBalance {
-	type key struct{ person, currency string }
-	state := map[key]*debtBalance{}
-	var order []key
-
-	for _, r := range rows {
-		k := key{strings.ToLower(r.person), r.currency}
-		bal, ok := state[k]
-		if !ok {
-			bal = &debtBalance{person: r.person, currency: r.currency}
-			state[k] = bal
-			order = append(order, k)
-		}
-		before := bal.minor
-		bal.minor += signedDebt(r.kind, r.minor)
-		// Opened, or flipped sides: the clock starts again.
-		if before == 0 || (before > 0) != (bal.minor > 0) {
-			bal.since = r.day
-		}
-		bal.person = r.person // the latest spelling wins
-	}
-
-	var out []debtBalance
-	for _, k := range order {
-		if bal := state[k]; bal.minor != 0 {
-			out = append(out, *bal)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return abs64(out[i].minor) > abs64(out[j].minor)
-	})
-	return out
-}
-
-func abs64(v int64) int64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-func (b *Bot) debtBalances(ctx context.Context, person string) ([]debtBalance, error) {
+func (b *Bot) debtBalances(ctx context.Context, person string) ([]finance.Balance, error) {
 	rows, err := b.pool.Query(ctx, `
 		SELECT person, currency, kind, amount_minor, spent_on
 		FROM finance_entries
@@ -756,10 +687,10 @@ func (b *Bot) debtBalances(ctx context.Context, person string) ([]debtBalance, e
 	}
 	defer rows.Close()
 
-	var all []debtRow
+	var all []finance.Row
 	for rows.Next() {
-		var r debtRow
-		if err := rows.Scan(&r.person, &r.currency, &r.kind, &r.minor, &r.day); err != nil {
+		var r finance.Row
+		if err := rows.Scan(&r.Person, &r.Currency, &r.Kind, &r.Minor, &r.Day); err != nil {
 			return nil, err
 		}
 		all = append(all, r)
@@ -767,20 +698,20 @@ func (b *Bot) debtBalances(ctx context.Context, person string) ([]debtBalance, e
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return foldDebts(all), nil
+	return finance.Fold(all), nil
 }
 
 // debtTotals splits balances into what I am owed and what I owe.
-func debtTotals(balances []debtBalance) (owedToMe, iOwe money, people int) {
+func debtTotals(balances []finance.Balance) (owedToMe, iOwe money, people int) {
 	owedToMe, iOwe = money{}, money{}
 	seen := map[string]bool{}
 	for _, d := range balances {
-		if d.minor > 0 {
-			owedToMe.add(d.currency, d.minor)
+		if d.Minor > 0 {
+			owedToMe.add(d.Currency, d.Minor)
 		} else {
-			iOwe.add(d.currency, -d.minor)
+			iOwe.add(d.Currency, -d.Minor)
 		}
-		seen[strings.ToLower(d.person)] = true
+		seen[strings.ToLower(d.Person)] = true
 	}
 	return owedToMe, iOwe, len(seen)
 }
@@ -831,15 +762,15 @@ func (b *Bot) debtsReport(ctx context.Context, arg string) string {
 		}
 		sb.WriteString(fmt.Sprintf("\n<b>%s</b> · %s\n", title, total))
 		for _, d := range balances {
-			if (d.minor > 0) != positive {
+			if (d.Minor > 0) != positive {
 				continue
 			}
 			age := "bugundan"
-			if days := int(today.Sub(d.since).Hours()/24 + 0.5); days > 0 {
-				age = fmt.Sprintf("%s dan, %d kun", d.since.Format("02.01"), days)
+			if days := int(today.Sub(d.Since).Hours()/24 + 0.5); days > 0 {
+				age = fmt.Sprintf("%s dan, %d kun", d.Since.Format("02.01"), days)
 			}
 			sb.WriteString(fmt.Sprintf("• %s — %s · %s\n",
-				escapeHTML(d.person), formatMoney(abs64(d.minor), d.currency), age))
+				escapeHTML(d.Person), formatMoney(finance.Abs(d.Minor), d.Currency), age))
 		}
 	}
 	section("Sizga qarzdor", owedToMe, true)
@@ -886,11 +817,11 @@ func (b *Bot) personHistory(ctx context.Context, name string) string {
 				return "❌ O'qib bo'lmadi: " + escapeHTML(shortError(err))
 			}
 			display = person
-			debt.add(currency, signedDebt(kind, minor))
+			debt.add(currency, finance.Signed(kind, minor))
 			if kind == kindGift {
 				given.add(currency, minor)
 			}
-			line := fmt.Sprintf("%s %s %s", day.Format("02.01.06"), kinds[kind].emoji,
+			line := fmt.Sprintf("%s %s %s", day.Format("02.01.06"), kindOf(kind).Emoji,
 				formatMoney(minor, currency))
 			if note != "" {
 				line += " — " + escapeHTML(truncate(note, 40))
@@ -1082,7 +1013,7 @@ func (b *Bot) financeReport(ctx context.Context, arg string) string {
 	var loanLines []string
 	for _, k := range []string{kindLent, kindRepaidIn, kindBorrowed, kindRepaidOut} {
 		if v := byKind[k]; v != nil {
-			loanLines = append(loanLines, fmt.Sprintf("%s %s — %s", kinds[k].emoji, kinds[k].label, v))
+			loanLines = append(loanLines, fmt.Sprintf("%s %s — %s", kindOf(k).Emoji, kindOf(k).Label, v))
 		}
 	}
 	if len(loanLines) > 0 {
@@ -1135,7 +1066,7 @@ func (b *Bot) categorySection(ctx context.Context, from, to string, totalUZS int
 	for _, cat := range order {
 		c := categoryByKey(cat)
 		m := perCat[cat]
-		line := fmt.Sprintf("%s %s — %s", c.emoji, c.label, m)
+		line := fmt.Sprintf("%s %s — %s", c.Emoji, c.Label, m)
 		if totalUZS > 0 && m["UZS"] > 0 {
 			line += fmt.Sprintf(" · %.0f%%", float64(m["UZS"])/float64(totalUZS)*100)
 		}
@@ -1200,7 +1131,7 @@ func (b *Bot) largestSection(ctx context.Context, from, to string) string {
 			return ""
 		}
 		lines = append(lines, fmt.Sprintf("%s · %s — %s", day.Format("02.01"),
-			formatMoney(minor, cur), escapeHTML(truncate(firstNonEmpty(note, categoryByKey(cat).label), 40))))
+			formatMoney(minor, cur), escapeHTML(truncate(firstNonEmpty(note, categoryByKey(cat).Label), 40))))
 	}
 	if len(lines) < 2 {
 		return "" // one entry is not a ranking
@@ -1260,4 +1191,28 @@ func (b *Bot) financeDailySection(ctx context.Context) string {
 	}
 
 	return sb.String()
+}
+
+/* -------------------------------- Mini App -------------------------------- */
+
+// webAppKeyboard is the button that opens the reports as a Mini App. The
+// page lives in the dashboard app under /tg and signs in with Telegram's
+// init data, so pressing it needs no login. Nil when the admin URL is not
+// https — Telegram refuses Mini Apps anywhere else.
+func (b *Bot) webAppKeyboard() *inlineKeyboard {
+	url := b.webAppURL()
+	if url == "" {
+		return nil
+	}
+	return &inlineKeyboard{InlineKeyboard: [][]inlineButton{{
+		{Text: "📊 Grafiklarni ochish", WebApp: &webAppInfo{URL: url}},
+	}}}
+}
+
+func (b *Bot) webAppURL() string {
+	base := strings.TrimSuffix(b.cfg.AdminSiteURL, "/")
+	if !strings.HasPrefix(base, "https://") {
+		return ""
+	}
+	return base + "/tg"
 }

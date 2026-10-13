@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -103,5 +104,23 @@ func TestSendMessageSuccess(t *testing.T) {
 
 	if err := c.sendMessage(context.Background(), 1, "hello"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// A Mini App button must not also carry callback_data: Telegram rejects a
+// button with two actions.
+func TestWebAppButtonJSON(t *testing.T) {
+	b := &Bot{cfg: Config{AdminSiteURL: "https://admin.example.com/"}}
+	raw, err := json.Marshal(b.webAppKeyboard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"inline_keyboard":[[{"text":"📊 Grafiklarni ochish","web_app":{"url":"https://admin.example.com/tg"}}]]}`
+	if string(raw) != want {
+		t.Errorf("keyboard JSON:\n got  %s\n want %s", raw, want)
+	}
+
+	if (&Bot{cfg: Config{AdminSiteURL: "http://localhost:3001"}}).webAppKeyboard() != nil {
+		t.Error("non-https admin URL should give no Mini App button")
 	}
 }

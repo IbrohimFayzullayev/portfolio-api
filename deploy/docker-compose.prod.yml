@@ -43,6 +43,11 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_TTL_HOURS: ${JWT_TTL_HOURS:-24}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      # The Telegram Mini App signs in with init data signed by the bot's
+      # token, and only these ids get in — the same two values as the bot.
+      # Without them POST /tg/auth answers 404 and nothing else changes.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID}
     networks: [internal]
 
   # Operations bot. Same image as `api`, different entrypoint — running it as

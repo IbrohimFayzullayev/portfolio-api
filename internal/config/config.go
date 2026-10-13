@@ -18,6 +18,27 @@ type Config struct {
 	JWTSecret   string
 	JWTTTL      time.Duration
 	CORSOrigins []string
+
+	// Telegram Mini App sign-in. Both optional: without them the Web App
+	// endpoint answers 404 and nothing else changes. Same values the bot
+	// container already has.
+	TelegramBotToken   string
+	TelegramAllowedIDs []int64
+}
+
+// TelegramWebAppEnabled reports whether the Mini App can sign anyone in.
+func (c *Config) TelegramWebAppEnabled() bool {
+	return c.TelegramBotToken != "" && len(c.TelegramAllowedIDs) > 0
+}
+
+// TelegramAllowed reports whether a Telegram user may open the Mini App.
+func (c *Config) TelegramAllowed(id int64) bool {
+	for _, allowed := range c.TelegramAllowedIDs {
+		if allowed == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads configuration from a .env file (if present) and the environment.
@@ -38,6 +59,17 @@ func Load() (*Config, error) {
 		JWTSecret:   os.Getenv("JWT_SECRET"),
 		JWTTTL:      time.Duration(ttlHours) * time.Hour,
 		CORSOrigins: splitAndTrim(getenv("CORS_ORIGINS", "http://localhost:3001")),
+
+		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+	}
+
+	// The same format the bot reads: one id, or several separated by commas.
+	for _, field := range splitAndTrim(os.Getenv("TELEGRAM_ALLOWED_USER_ID")) {
+		id, err := strconv.ParseInt(field, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("TELEGRAM_ALLOWED_USER_ID: %q is not a number", field)
+		}
+		cfg.TelegramAllowedIDs = append(cfg.TelegramAllowedIDs, id)
 	}
 
 	if cfg.DatabaseURL == "" {

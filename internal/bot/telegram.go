@@ -60,7 +60,15 @@ type CallbackQuery struct {
 type inlineButton struct {
 	Text string `json:"text"`
 	// Max 64 bytes, Telegram's limit. A UUID with a short prefix fits.
-	CallbackData string `json:"callback_data"`
+	// A button carries exactly one action, so this and WebApp are both
+	// omitted when empty.
+	CallbackData string `json:"callback_data,omitempty"`
+	// Opens a Mini App inside Telegram (private chats only).
+	WebApp *webAppInfo `json:"web_app,omitempty"`
+}
+
+type webAppInfo struct {
+	URL string `json:"url"`
 }
 
 type inlineKeyboard struct {

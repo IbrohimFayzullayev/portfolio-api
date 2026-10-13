@@ -461,6 +461,9 @@ func (b *Bot) renderNotification(n notification) string {
 	case "reminder":
 		return "⏰ <b>Eslatma</b>\n\n" + escapeHTML(str(n.payload, "text"))
 
+	case "growth.nudge":
+		return renderGrowthNudge(n.payload)
+
 	case "cert.expiring":
 		days := num(n.payload, "days")
 		head := fmt.Sprintf("🔐 <b>Sertifikat %d kundan keyin tugaydi</b>", days)

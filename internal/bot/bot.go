@@ -230,6 +230,13 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		return
 	}
 
+	// A voice message is English speaking practice: kept, and counted.
+	if msg.Voice != nil {
+		b.reply(cctx, msg.Chat.ID, b.recordVoice(cctx, msg.Voice, msg.Caption))
+		log.Printf("bot: voice took %s", time.Since(started).Round(time.Millisecond))
+		return
+	}
+
 	// An answer to something the bot asked. The question is identified by the
 	// message it replies to, so no state had to survive in this process.
 	if msg.ReplyToMessage != nil {
@@ -296,6 +303,13 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		b.sendEditCard(cctx, msg.Chat.ID,
 			strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 		return
+	case "/yakun":
+		// Sends the summary and then the two recordings, so it replies itself.
+		b.closeSprint(cctx, msg.Chat.ID, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+		return
+	case "/solishtir":
+		b.compareCommand(cctx, msg.Chat.ID)
+		return
 	case "/qoralama":
 		reply := b.createDraft(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 		if err := b.tg.sendMessage(cctx, msg.Chat.ID, reply); err != nil {
@@ -308,6 +322,18 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	switch cmd {
 	case "/start", "/help":
 		reply = helpText()
+	case "/qildim":
+		reply = b.logCommand(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+	case "/bugun":
+		reply = b.todayReport(cctx)
+	case "/sprint":
+		reply = b.sprintCommand(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+	case "/ball":
+		reply = b.scoreCommand(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+	case "/kitob":
+		reply = b.bookCommand(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+	case "/kitoblar":
+		reply = b.booksReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	case "/status":
 		reply = b.statusReport(cctx)
 	case "/invitations":
@@ -340,6 +366,14 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 // time only one of them is updated.
 func commandMenu() []botCommand {
 	return []botCommand{
+		{Command: "qildim", Description: "Ingliz: /qildim 45 w essay"},
+		{Command: "bugun", Description: "Bugungi ingliz, streak va sprint"},
+		{Command: "sprint", Description: "Joriy sprint yoki yangisini ochish"},
+		{Command: "yakun", Description: "Sprintni yopish: natija va oldin/keyin"},
+		{Command: "solishtir", Description: "Birinchi va oxirgi ovozli yozuv"},
+		{Command: "ball", Description: "IELTS ball: /ball 6.0 L6.5 W5.5"},
+		{Command: "kitob", Description: "Kitob: /kitob 40 120-bet"},
+		{Command: "kitoblar", Description: "O'qish statistikasi"},
 		{Command: "balans", Description: "Qo'limda qancha bor; /balans 25mln - tekshirish"},
 		{Command: "hisob", Description: "Pul: shu oy kirim, sarf, qoldi"},
 		{Command: "qarzlar", Description: "Kim kimga qarzdor"},
@@ -448,6 +482,19 @@ func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
 func helpText() string {
 	return strings.Join([]string{
 		"<b>Platforma boti</b>",
+		"",
+		"<b>O'sish — ingliz tili</b>",
+		"/qildim 45 w essay — writing · s speaking · l · r · v · g · m",
+		"🎙 ovozli xabar — speaking sifatida saqlanadi",
+		"/bugun — bugungi daqiqalar, minimum, streak",
+		"/sprint — joriy sprint · /sprint &lt;natija&gt; — yangisi",
+		"/yakun — sprintni yopish, oldin/keyin yozuvlari",
+		"/solishtir — birinchi va oxirgi yozuv · /ball 6.0 L6.5 — ball",
+		"",
+		"<b>Kitoblar</b>",
+		"/kitob yangi Nomi - Muallif 320 bet",
+		"/kitob 40 120-bet — o'qidim · /kitob tugatdim",
+		"/kitoblar — statistika",
 		"",
 		"<b>Hisob-kitob</b> — buyruqsiz, shunchaki yozing:",
 		"<code>tushlik 35k</code> · <code>kecha taksi 18000</code>",

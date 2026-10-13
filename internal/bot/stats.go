@@ -177,7 +177,7 @@ func (b *Bot) runWeeklyReport(ctx context.Context) {
 		}
 
 		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		text := "🗓 <b>Haftalik hisobot</b>\n" + b.statsReport(cctx, "hafta")
+		text := "🗓 <b>Haftalik hisobot</b>\n" + b.statsReport(cctx, "hafta") + b.growthWeeklySection(cctx)
 		b.queue(cctx, "weekly.summary", map[string]any{"text": text})
 		cancel()
 	}

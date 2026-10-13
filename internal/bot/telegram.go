@@ -91,6 +91,18 @@ type Message struct {
 	Document *Document `json:"document"`
 	// Text sent with the file, if any.
 	Caption string `json:"caption"`
+
+	// A voice message: English speaking practice, kept by file_id.
+	Voice *Voice `json:"voice"`
+}
+
+// Voice is a recorded voice message. FileID is what sendVoice accepts to send
+// the same audio again; FileUniqueID is stable across bots and re-sends, so it
+// is what deduplicates.
+type Voice struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	Duration     int    `json:"duration"`
 }
 
 type Document struct {
@@ -233,6 +245,17 @@ func (c *telegramClient) sendMessageMarkup(
 		body["reply_markup"] = markup
 	}
 	return c.call(ctx, "sendMessage", body, nil)
+}
+
+// sendVoice re-sends a voice message Telegram already holds, by its file_id.
+// Nothing is uploaded: the audio never leaves Telegram.
+func (c *telegramClient) sendVoice(ctx context.Context, chatID int64, fileID, caption string) error {
+	return c.call(ctx, "sendVoice", map[string]any{
+		"chat_id":    chatID,
+		"voice":      fileID,
+		"caption":    caption,
+		"parse_mode": "HTML",
+	}, nil)
 }
 
 // editMessageText replaces a message in place — how a pressed button updates

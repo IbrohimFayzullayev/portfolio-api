@@ -58,6 +58,10 @@ func (b *Bot) dailySummary(ctx context.Context) string {
 	// open with a row of zeros.
 	sb.WriteString(b.financeDailySection(ctx))
 
+	// English and books: the day's other number. Same rule — absent until
+	// something has been written down.
+	sb.WriteString(b.growthDailySection(ctx))
+
 	var published, drafts int64
 	err := b.pool.QueryRow(ctx, `
 		SELECT

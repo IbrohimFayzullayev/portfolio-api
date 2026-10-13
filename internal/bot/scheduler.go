@@ -58,6 +58,7 @@ func (b *Bot) runSchedule(ctx context.Context) {
 	b.scheduleRestoreTest(cctx)
 	b.forgetExpiredPrompts(cctx)
 	b.pruneHealthHistory(cctx)
+	b.scheduleGrowthNudge(cctx)
 }
 
 /* -------------------------- invitation reminders -------------------------- */

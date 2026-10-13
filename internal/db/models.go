@@ -8,7 +8,28 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type Book struct {
+	ID         uuid.UUID  `json:"id"`
+	Title      string     `json:"title"`
+	Author     string     `json:"author"`
+	TotalPages *int32     `json:"total_pages"`
+	Status     string     `json:"status"`
+	StartedOn  time.Time  `json:"started_on"`
+	FinishedOn *time.Time `json:"finished_on"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+type BookSession struct {
+	ID          uuid.UUID `json:"id"`
+	BookID      uuid.UUID `json:"book_id"`
+	Day         time.Time `json:"day"`
+	Minutes     int32     `json:"minutes"`
+	PageReached *int32    `json:"page_reached"`
+	CreatedAt   time.Time `json:"created_at"`
+}
 
 type BotHeartbeat struct {
 	ID     int16     `json:"id"`
@@ -75,6 +96,50 @@ type FinanceEntry struct {
 	Source      string    `json:"source"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type GrowthLog struct {
+	ID        uuid.UUID `json:"id"`
+	Day       time.Time `json:"day"`
+	Kind      string    `json:"kind"`
+	Minutes   int32     `json:"minutes"`
+	Note      string    `json:"note"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type GrowthRecording struct {
+	ID             uuid.UUID   `json:"id"`
+	Day            time.Time   `json:"day"`
+	TelegramFileID string      `json:"telegram_file_id"`
+	FileUniqueID   string      `json:"file_unique_id"`
+	DurationSec    int32       `json:"duration_sec"`
+	Caption        string      `json:"caption"`
+	LogID          pgtype.UUID `json:"log_id"`
+	CreatedAt      time.Time   `json:"created_at"`
+}
+
+type GrowthScore struct {
+	ID        uuid.UUID      `json:"id"`
+	TakenOn   time.Time      `json:"taken_on"`
+	Kind      string         `json:"kind"`
+	Overall   pgtype.Numeric `json:"overall"`
+	Listening pgtype.Numeric `json:"listening"`
+	Reading   pgtype.Numeric `json:"reading"`
+	Writing   pgtype.Numeric `json:"writing"`
+	Speaking  pgtype.Numeric `json:"speaking"`
+	Note      string         `json:"note"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+type GrowthSprint struct {
+	ID         uuid.UUID  `json:"id"`
+	Goal       string     `json:"goal"`
+	StartsOn   time.Time  `json:"starts_on"`
+	EndsOn     time.Time  `json:"ends_on"`
+	ResultNote string     `json:"result_note"`
+	ClosedAt   *time.Time `json:"closed_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type HealthCheck struct {

@@ -32,6 +32,7 @@ const (
 	kindRepaidIn  = finance.KindRepaidIn
 	kindBorrowed  = finance.KindBorrowed
 	kindRepaidOut = finance.KindRepaidOut
+	kindIncome    = finance.KindIncome
 )
 
 func isDebtKind(kind string) bool { return finance.IsDebt(kind) }
@@ -68,6 +69,63 @@ func matchesStem(word, stem string) bool {
 		}
 	}
 	return false
+}
+
+// guessCategory picks from the list that fits the kind: income from income
+// sources, spending from spending categories, debts always "qarz".
+func guessCategory(kind string, norm []string, words []int) string {
+	switch {
+	case isDebtKind(kind):
+		return "qarz"
+	case kind == kindIncome:
+		for _, i := range words {
+			if c := incomeCategoryOf(norm[i]); c != "" {
+				return c
+			}
+		}
+	default:
+		for _, i := range words {
+			if c := categoryOf(norm[i]); c != "" {
+				return c
+			}
+		}
+	}
+	return finance.DefaultCategory(kind)
+}
+
+func incomeCategoryOf(word string) string {
+	for _, c := range finance.IncomeCategories {
+		for _, s := range c.Stems {
+			if matchesStem(word, s) {
+				return c.Key
+			}
+		}
+	}
+	return ""
+}
+
+// Words that mean money came in, without needing a "+".
+var incomeStems = []string{"maosh", "avans", "bonus", "premiya", "zarplata", "kirim", "tushdi"}
+
+// isIncomeText: an income word, or "oylik" with nothing to spend it on.
+// "oylik 10mln" is a salary; "internet oylik 100k" is a monthly bill.
+func isIncomeText(norm []string, words []int) bool {
+	hasOylik, hasSpending := false, false
+	for _, i := range words {
+		w := norm[i]
+		for _, s := range incomeStems {
+			if matchesStem(w, s) {
+				return true
+			}
+		}
+		if matchesStem(w, "oylik") {
+			hasOylik = true
+		}
+		if categoryOf(w) != "" {
+			hasSpending = true
+		}
+	}
+	return hasOylik && !hasSpending
 }
 
 func categoryOf(word string) string {
@@ -148,6 +206,20 @@ func parseEntry(text string, today time.Time) (parsedEntry, error) {
 	}
 	used := make([]bool, len(orig))
 
+	// A leading "+" anywhere ("+10mln oylik", "oylik +10mln", "+ 500$")
+	// means money came in. It is the one unambiguous way to say so.
+	plus := false
+	for i, w := range norm {
+		if strings.HasPrefix(w, "+") {
+			plus = true
+			norm[i] = strings.TrimLeft(w, "+")
+			orig[i] = strings.TrimLeft(orig[i], "+")
+			if norm[i] == "" {
+				used[i] = true
+			}
+		}
+	}
+
 	e := parsedEntry{spentOn: today, currency: "UZS"}
 
 	// The date first, so "12.10" is never read as twelve so'm.
@@ -222,6 +294,11 @@ func parseEntry(text string, today time.Time) (parsedEntry, error) {
 		e.kind = kindBorrowed
 		e.person = firstNonEmpty(ablative, dative)
 
+	case !hasQarz && (plus || isIncomeText(norm, words)):
+		e.kind = kindIncome
+		// "onamdan +500k": who it came from, when it says.
+		e.person = ablative
+
 	case hasQarz:
 		e.kind = kindLent
 		e.person = dative
@@ -238,17 +315,7 @@ func parseEntry(text string, today time.Time) (parsedEntry, error) {
 		return e, errNoPerson
 	}
 
-	if isDebtKind(e.kind) {
-		e.category = "qarz"
-	} else {
-		e.category = "boshqa"
-		for _, i := range words {
-			if c := categoryOf(norm[i]); c != "" {
-				e.category = c
-				break
-			}
-		}
-	}
+	e.category = guessCategory(e.kind, norm, words)
 
 	noteWords := make([]string, 0, len(words))
 	for _, i := range words {
@@ -423,8 +490,9 @@ func parseAmountAt(norm []string, used []bool, i int) (minor int64, currency str
 			break
 		}
 	}
-	// "2 ta non 8000": a count, not the price.
-	if consumed == 1 && mult == "" && cur == "" && countWords[next()] {
+	// "2 ta non 8000": a count, not the price. Counts are small numbers;
+	// "10000000 oylik" is a salary, not ten million months.
+	if consumed == 1 && mult == "" && cur == "" && len(num) <= 3 && countWords[next()] {
 		return 0, "", 0, false
 	}
 	if mult == "" {

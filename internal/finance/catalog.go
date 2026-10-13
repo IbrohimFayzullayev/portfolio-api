@@ -12,6 +12,7 @@ const (
 	KindRepaidIn  = "repaid_in"  // they paid back: they owe me less
 	KindBorrowed  = "borrowed"   // loan I took: I owe more
 	KindRepaidOut = "repaid_out" // I paid back: I owe less
+	KindIncome    = "income"     // money earned or received: salary, freelance
 )
 
 type Kind struct {
@@ -24,16 +25,20 @@ type Kind struct {
 	Debt bool `json:"debt"`
 	// Money that left and is not coming back: what "spent" sums.
 	Spending bool `json:"spending"`
+	// Which way the money in hand moves: +1 in, -1 out. Every kind moves it;
+	// a loan given is not spending, but the cash is gone from the pocket.
+	Cash int `json:"cash"`
 }
 
 // Kinds in picker order: the common case first.
 var Kinds = []Kind{
-	{KindExpense, "e", "💸", "Xarajat", false, true},
-	{KindGift, "g", "🎁", "Berdim", false, true},
-	{KindLent, "l", "🤝", "Qarz berdim", true, false},
-	{KindRepaidIn, "i", "↩️", "Qarz qaytdi", true, false},
-	{KindBorrowed, "b", "🫴", "Qarz oldim", true, false},
-	{KindRepaidOut, "o", "↪️", "Qarzni qaytardim", true, false},
+	{KindExpense, "e", "💸", "Xarajat", false, true, -1},
+	{KindIncome, "k", "💰", "Kirim", false, false, +1},
+	{KindGift, "g", "🎁", "Berdim", false, true, -1},
+	{KindLent, "l", "🤝", "Qarz berdim", true, false, -1},
+	{KindRepaidIn, "i", "↩️", "Qarz qaytdi", true, false, +1},
+	{KindBorrowed, "b", "🫴", "Qarz oldim", true, false, +1},
+	{KindRepaidOut, "o", "↪️", "Qarzni qaytardim", true, false, -1},
 }
 
 // KindOf returns the kind with this key; ok is false for an unknown key.
@@ -65,6 +70,17 @@ func IsDebt(kind string) bool {
 func IsSpending(kind string) bool {
 	k, ok := KindOf(kind)
 	return ok && k.Spending
+}
+
+func IsIncome(kind string) bool { return kind == KindIncome }
+
+// CashEffect is a row's effect on the money in hand.
+func CashEffect(kind string, minor int64) int64 {
+	k, ok := KindOf(kind)
+	if !ok {
+		return 0
+	}
+	return int64(k.Cash) * minor
 }
 
 type Category struct {
@@ -136,11 +152,37 @@ var Categories = []Category{
 	{"boshqa", "📦", "Boshqa", nil},
 }
 
+// Where income comes from. A separate list, so a salary is never filed under
+// "Ovqat" and a lunch never under "Oylik"; the parser guesses from this list
+// only for income, and from Categories only for everything else.
+var IncomeCategories = []Category{
+	{"oylik", "💵", "Oylik", []string{"maosh", "oylik", "avans", "bonus", "premiya", "zarplata"}},
+	{"qoshimcha", "🧑‍💻", "Qo'shimcha ish", []string{
+		"freelance", "frilans", "loyiha", "zakaz", "buyurtma", "upwork", "dars",
+	}},
+	{"sovga_in", "🎁", "Sovg'a, yordam", []string{"sovg'a", "hadya", "yordam"}},
+	{"kirim_boshqa", "💰", "Boshqa kirim", nil},
+}
+
+// DefaultCategory is where an entry of this kind goes when nothing better
+// is known.
+func DefaultCategory(kind string) string {
+	switch {
+	case IsDebt(kind):
+		return "qarz"
+	case IsIncome(kind):
+		return "kirim_boshqa"
+	}
+	return "boshqa"
+}
+
 // CategoryByKey returns the category, or "boshqa" for an unknown key.
 func CategoryByKey(key string) Category {
-	for _, c := range Categories {
-		if c.Key == key {
-			return c
+	for _, list := range [][]Category{Categories, IncomeCategories} {
+		for _, c := range list {
+			if c.Key == key {
+				return c
+			}
 		}
 	}
 	return Categories[len(Categories)-1]
@@ -148,12 +190,42 @@ func CategoryByKey(key string) Category {
 
 // IsCategory reports whether key is one of the categories above.
 func IsCategory(key string) bool {
-	for _, c := range Categories {
-		if c.Key == key {
+	return CategoryFits(KindExpense, key) || CategoryFits(KindIncome, key) || key == "qarz"
+}
+
+// CategoryFits reports whether a category belongs with a kind: debt rows in
+// "qarz", income in an income category, everything else in a spending one.
+func CategoryFits(kind, key string) bool {
+	if IsDebt(kind) {
+		return key == "qarz"
+	}
+	list := Categories
+	if IsIncome(kind) {
+		list = IncomeCategories
+	}
+	for _, c := range list {
+		if c.Key == key && c.Key != "qarz" {
 			return true
 		}
 	}
 	return false
+}
+
+// CategoriesFor lists what may be chosen for a kind.
+func CategoriesFor(kind string) []Category {
+	if IsDebt(kind) {
+		return []Category{CategoryByKey("qarz")}
+	}
+	if IsIncome(kind) {
+		return IncomeCategories
+	}
+	out := make([]Category, 0, len(Categories))
+	for _, c := range Categories {
+		if c.Key != "qarz" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // IsCurrency: the two currencies entries may be in.

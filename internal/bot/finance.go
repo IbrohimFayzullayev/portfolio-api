@@ -275,6 +275,17 @@ func (b *Bot) entryCard(ctx context.Context, id string) (string, *inlineKeyboard
 		}
 	}
 
+	// And what is left in hand after it — the number the whole balance
+	// feature exists for. Before the first checkpoint there is none, so
+	// the card says how to start one instead.
+	if bal, err := b.balanceNow(ctx, e.currency); err == nil {
+		if bal.checkpoint == nil {
+			sb.WriteString("\n<i>Balansni boshlash: /balans 25mln</i>")
+		} else {
+			sb.WriteString(fmt.Sprintf("\n💼 Qoldi: <b>%s</b>", formatMoney(bal.minor, e.currency)))
+		}
+	}
+
 	return sb.String(), entryKeyboard(e.id)
 }
 
@@ -293,7 +304,7 @@ func entryKeyboard(id string) *inlineKeyboard {
 func categoryPicker(e financeEntry) (string, *inlineKeyboard) {
 	var rows [][]inlineButton
 	var row []inlineButton
-	for _, c := range finance.Categories {
+	for _, c := range finance.CategoriesFor(e.kind) {
 		label := c.Emoji + " " + c.Label
 		if c.Key == e.category {
 			label = "• " + label
@@ -427,14 +438,19 @@ func (b *Bot) setCategory(ctx context.Context, id, key string) string {
 	if c.Key != key {
 		return "Noma'lum kategoriya"
 	}
-	tag, err := b.pool.Exec(ctx, `
-		UPDATE finance_entries SET category = $2, updated_at = now()
-		WHERE $1 ~ '^[0-9a-f-]{36}$' AND id = $1::uuid`, id, key)
+	e, err := b.loadEntry(ctx, id)
 	if err != nil {
-		return "Xato: " + shortError(err)
-	}
-	if tag.RowsAffected() == 0 {
 		return "Yozuv topilmadi"
+	}
+	// Only a category that fits the row's kind: a lunch never lands in
+	// "Oylik" because an old picker was pressed after the kind changed.
+	if !finance.CategoryFits(e.kind, key) {
+		return "Bu turga mos emas"
+	}
+	if _, err := b.pool.Exec(ctx, `
+		UPDATE finance_entries SET category = $2, updated_at = now()
+		WHERE id = $1::uuid`, id, key); err != nil {
+		return "Xato: " + shortError(err)
 	}
 	return c.Label
 }
@@ -451,17 +467,14 @@ func (b *Bot) setKind(ctx context.Context, id, kind string) string {
 	// Debt rows live in the "qarz" category; a row leaving debt gets its
 	// category guessed again from its note rather than keeping "qarz".
 	category := e.category
-	switch {
-	case isDebtKind(kind):
-		category = "qarz"
-	case category == "qarz":
-		category = "boshqa"
-		for _, w := range strings.Fields(e.note) {
-			if c := categoryOf(normalizeWord(w)); c != "" {
-				category = c
-				break
-			}
+	if !finance.CategoryFits(kind, category) {
+		norm := strings.Fields(e.note)
+		words := make([]int, len(norm))
+		for i := range norm {
+			norm[i] = normalizeWord(norm[i])
+			words[i] = i
 		}
+		category = guessCategory(kind, norm, words)
 	}
 
 	if _, err := b.pool.Exec(ctx, `
@@ -983,6 +996,12 @@ func (b *Bot) financeReport(ctx context.Context, arg string) string {
 		}
 	}
 
+	income := byKind[kindIncome]
+	if income != nil {
+		sb.WriteString(fmt.Sprintf("\n💰 <b>Kirim: %s</b>\n", income))
+		sb.WriteString(b.incomeSourcesSection(ctx, from, to))
+	}
+
 	sb.WriteString(fmt.Sprintf("\n💸 <b>Sarflandi: %s</b>\n", spent))
 	if v := byKind[kindExpense]; v != nil {
 		sb.WriteString(fmt.Sprintf("Xarajat — %s · %d ta\n", v, counts[kindExpense]))
@@ -993,7 +1012,11 @@ func (b *Bot) financeReport(ctx context.Context, arg string) string {
 	if days := p.days(); days > 1 && !spent.isZero() {
 		avg := money{}
 		for cur, v := range spent {
-			avg.add(cur, v/int64(days))
+			per := v / int64(days)
+			if cur == "UZS" {
+				per = per / 100 * 100 // whole so'm
+			}
+			avg.add(cur, per)
 		}
 		sb.WriteString(fmt.Sprintf("Kuniga o'rtacha — %s\n", avg))
 	}
@@ -1002,6 +1025,10 @@ func (b *Bot) financeReport(ctx context.Context, arg string) string {
 			sb.WriteString(fmt.Sprintf("O'tgan oy shu kunlarda — %s%s\n",
 				prev, delta(spent["UZS"], prev["UZS"])))
 		}
+	}
+
+	if income != nil {
+		sb.WriteString(fmt.Sprintf("\n🟰 <b>Qoldi: %s</b>\n", netLine(income, spent)))
 	}
 
 	sb.WriteString(b.categorySection(ctx, from, to, spent["UZS"]))
@@ -1139,13 +1166,51 @@ func (b *Bot) largestSection(ctx context.Context, from, to string) string {
 	return "\n<b>Eng kattalari</b>\n" + strings.Join(lines, "\n") + "\n"
 }
 
-func (b *Bot) debtFooter(ctx context.Context) string {
-	balances, err := b.debtBalances(ctx, "")
-	if err != nil || len(balances) == 0 {
+// incomeSourcesSection: where the income came from, one line per source,
+// only when there is more than one.
+func (b *Bot) incomeSourcesSection(ctx context.Context, from, to string) string {
+	rows, err := b.pool.Query(ctx, `
+		SELECT category, currency, sum(amount_minor)::bigint
+		FROM finance_entries
+		WHERE kind = 'income' AND spent_on >= $1::date AND spent_on < $2::date
+		GROUP BY category, currency
+		ORDER BY 3 DESC`, from, to)
+	if err != nil {
 		return ""
 	}
-	owedToMe, iOwe, _ := debtTotals(balances)
-	return fmt.Sprintf("\n🤝 Sizga qarzdor: %s · Siz: %s — /qarzlar", owedToMe, iOwe)
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var cat, cur string
+		var sum int64
+		if err := rows.Scan(&cat, &cur, &sum); err != nil {
+			return ""
+		}
+		c := categoryByKey(cat)
+		lines = append(lines, fmt.Sprintf("%s %s — %s", c.Emoji, c.Label, formatMoney(sum, cur)))
+	}
+	if len(lines) < 2 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// debtFooter closes a report with where things stand now, whatever period
+// the report was about: money in hand, and open debts.
+func (b *Bot) debtFooter(ctx context.Context) string {
+	var sb strings.Builder
+	if states, err := b.balances(ctx); err == nil && len(states) > 0 {
+		inHand := money{}
+		for _, st := range states {
+			inHand.add(st.currency, st.minor)
+		}
+		sb.WriteString(fmt.Sprintf("\n💼 Balans: %s — /balans", inHand))
+	}
+	if balances, err := b.debtBalances(ctx, ""); err == nil && len(balances) > 0 {
+		owedToMe, iOwe, _ := debtTotals(balances)
+		sb.WriteString(fmt.Sprintf("\n🤝 Sizga qarzdor: %s · Siz: %s — /qarzlar", owedToMe, iOwe))
+	}
+	return sb.String()
 }
 
 /* ---------------------------- daily summary ------------------------------- */
@@ -1165,6 +1230,15 @@ func (b *Bot) financeDailySection(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
 
+	// What is in hand comes first: it is the number the rest explains.
+	if states, err := b.balances(ctx); err == nil && len(states) > 0 {
+		inHand := money{}
+		for _, st := range states {
+			inHand.add(st.currency, st.minor)
+		}
+		sb.WriteString(fmt.Sprintf("💼 Balans: %s\n", inHand))
+	}
+
 	if spent, n, err := b.spentBetween(ctx, yesterday, today); err == nil {
 		if n == 0 {
 			sb.WriteString("💸 Kecha: hech narsa yozilmagan\n")
@@ -1182,7 +1256,23 @@ func (b *Bot) financeDailySection(ctx context.Context) string {
 		label = monthName(from.Month()) + " jami"
 	}
 	if spent, _, err := b.spentBetween(ctx, from, to); err == nil {
-		sb.WriteString(fmt.Sprintf("📆 %s: %s — /hisob\n", label, spent))
+		income, err := b.incomeBetween(ctx, from, to)
+		if err != nil || income.isZero() {
+			sb.WriteString(fmt.Sprintf("📆 %s: %s — /hisob\n", label, spent))
+		} else {
+			sb.WriteString(fmt.Sprintf("📆 %s: kirim %s · sarf %s · qoldi %s\n",
+				label, income, spent, netLine(income, spent)))
+			if today.Day() != 1 {
+				if end, ok := monthProjection(today, income, spent); ok {
+					sign := ""
+					if end > 0 {
+						sign = "+"
+					}
+					sb.WriteString(fmt.Sprintf("📈 Shu sur'atda oy oxirida: ≈ %s%s\n",
+						sign, formatMoney(end, "UZS")))
+				}
+			}
+		}
 	}
 
 	if balances, err := b.debtBalances(ctx, ""); err == nil && len(balances) > 0 {
@@ -1225,4 +1315,264 @@ func (b *Bot) webAppURL() string {
 		return ""
 	}
 	return base + "/tg"
+}
+
+/* -------------------------------- balance --------------------------------- */
+
+// balanceState is the money in hand in one currency: the latest checkpoint
+// and what has come in and gone out since (internal/finance/balance.go).
+type balanceState struct {
+	currency   string
+	checkpoint *finance.Checkpoint // nil: never counted
+	minor      int64
+	in, out    int64
+}
+
+func (b *Bot) latestCheckpoint(ctx context.Context, currency string) (*finance.Checkpoint, error) {
+	var cp finance.Checkpoint
+	err := b.pool.QueryRow(ctx, `
+		SELECT id::text, currency, amount_minor, taken_at, computed_minor, note
+		FROM finance_checkpoints
+		WHERE currency = $1
+		ORDER BY taken_at DESC, created_at DESC
+		LIMIT 1`, currency).Scan(&cp.ID, &cp.Currency, &cp.Minor, &cp.TakenAt, &cp.Computed, &cp.Note)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &cp, nil
+}
+
+// flowsSince reads the rows that may come after a checkpoint. The SQL is a
+// cheap superset (from the checkpoint's day on); Covers decides exactly.
+func (b *Bot) flowsSince(ctx context.Context, cp finance.Checkpoint) ([]finance.Flow, error) {
+	rows, err := b.pool.Query(ctx, `
+		SELECT currency, kind, amount_minor, spent_on, created_at
+		FROM finance_entries
+		WHERE currency = $1 AND spent_on >= $2::date`,
+		cp.Currency, cp.TakenAt.In(tashkent).Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []finance.Flow
+	for rows.Next() {
+		var f finance.Flow
+		if err := rows.Scan(&f.Currency, &f.Kind, &f.Minor, &f.Day, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (b *Bot) balanceNow(ctx context.Context, currency string) (balanceState, error) {
+	st := balanceState{currency: currency}
+	cp, err := b.latestCheckpoint(ctx, currency)
+	if err != nil || cp == nil {
+		return st, err
+	}
+	flows, err := b.flowsSince(ctx, *cp)
+	if err != nil {
+		return st, err
+	}
+	st.checkpoint = cp
+	st.minor, st.in, st.out = finance.Since(*cp, flows, tashkent)
+	return st, nil
+}
+
+// balances returns every currency that has ever been counted, so in UZS first.
+func (b *Bot) balances(ctx context.Context) ([]balanceState, error) {
+	var out []balanceState
+	for _, cur := range []string{"UZS", "USD"} {
+		st, err := b.balanceNow(ctx, cur)
+		if err != nil {
+			return nil, err
+		}
+		if st.checkpoint != nil {
+			out = append(out, st)
+		}
+	}
+	return out, nil
+}
+
+// balanceCommand is /balans: with no argument a report, with an amount a
+// recount ("this is what is really there now").
+func (b *Bot) balanceCommand(ctx context.Context, arg string) string {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return b.balanceReport(ctx)
+	}
+
+	negative := strings.HasPrefix(arg, "-")
+	minor, currency, ok := parseAmount(strings.TrimLeft(arg, "-"))
+	if !ok {
+		return "Summani tushunmadim. Masalan: <code>/balans 25mln</code>, " +
+			"<code>/balans 24 700 000</code>, <code>/balans $3000</code>"
+	}
+	if negative {
+		minor = -minor
+	}
+
+	before, err := b.balanceNow(ctx, currency)
+	if err != nil {
+		return "❌ O'qib bo'lmadi: " + escapeHTML(shortError(err))
+	}
+	var computed *int64
+	if before.checkpoint != nil {
+		v := before.minor
+		computed = &v
+	}
+	if _, err := b.pool.Exec(ctx, `
+		INSERT INTO finance_checkpoints (currency, amount_minor, taken_at, computed_minor, source)
+		VALUES ($1, $2, now(), $3, 'bot')`, currency, minor, computed); err != nil {
+		return "❌ Saqlanmadi: " + escapeHTML(shortError(err))
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("✅ <b>Balans yozildi: %s</b>\n", formatMoney(minor, currency)))
+	if computed == nil {
+		sb.WriteString("\nBoshlang'ich summa. Endi har kirim va xarajat shundan qo'shilib-ayrilib boradi.")
+		sb.WriteString("\n<i>Vaqti-vaqti bilan haqiqiy summani shu buyruq bilan yozib turing.</i>")
+		return sb.String()
+	}
+	diff := minor - *computed
+	sb.WriteString(fmt.Sprintf("Hisob bo'yicha edi: %s\n", formatMoney(*computed, currency)))
+	since := before.checkpoint.TakenAt.In(tashkent).Format("02.01")
+	switch {
+	case diff == 0:
+		sb.WriteString("\nHisob bilan to'liq mos keldi 👌")
+	case diff < 0:
+		sb.WriteString(fmt.Sprintf("\nFarq: <b>%s</b> — %s dan beri yozilmay qolgan xarajat.",
+			formatMoney(diff, currency), since))
+	default:
+		sb.WriteString(fmt.Sprintf("\nFarq: <b>+%s</b> — %s dan beri yozilmagan kirim.",
+			formatMoney(diff, currency), since))
+	}
+	return sb.String()
+}
+
+func (b *Bot) balanceReport(ctx context.Context) string {
+	states, err := b.balances(ctx)
+	if err != nil {
+		return "❌ O'qib bo'lmadi: " + escapeHTML(shortError(err))
+	}
+	if len(states) == 0 {
+		return strings.Join([]string{
+			"💼 <b>Balans</b>",
+			"",
+			"Hali boshlang'ich summa yozilmagan. Hozir qo'lingizda (karta + naqd) qancha bor?",
+			"",
+			"<code>/balans 25mln</code>",
+			"<code>/balans $3000</code> — dollar alohida",
+			"",
+			"Shundan keyin har kirim (<code>+10mln oylik</code>) qo'shiladi, har xarajat ayriladi.",
+		}, "\n")
+	}
+
+	var sb strings.Builder
+	sb.WriteString("💼 <b>Balans</b>\n")
+	inHand := money{}
+	for _, st := range states {
+		inHand.add(st.currency, st.minor)
+		sb.WriteString(fmt.Sprintf("\n<b>%s</b>\n", formatMoney(st.minor, st.currency)))
+		sb.WriteString(fmt.Sprintf("Tekshiruv: %s · %s\n",
+			st.checkpoint.TakenAt.In(tashkent).Format("02.01.2006"),
+			formatMoney(st.checkpoint.Minor, st.currency)))
+		if st.in != 0 || st.out != 0 {
+			sb.WriteString(fmt.Sprintf("Shundan beri: +%s · -%s\n",
+				formatMoney(st.in, st.currency), formatMoney(st.out, st.currency)))
+		}
+	}
+
+	// Money lent is still mine, just not in my pocket; money borrowed is in
+	// my pocket but not mine. "Umumiy holat" is the honest total.
+	if debts, err := b.debtBalances(ctx, ""); err == nil && len(debts) > 0 {
+		owed, owe, _ := debtTotals(debts)
+		total := money{}
+		for cur, v := range inHand {
+			total.add(cur, v)
+		}
+		for cur, v := range owed {
+			total.add(cur, v)
+		}
+		for cur, v := range owe {
+			total.add(cur, -v)
+		}
+		sb.WriteString(fmt.Sprintf("\n🤝 Sizga qarzdor: %s · Siz: %s\n", owed, owe))
+		sb.WriteString(fmt.Sprintf("📊 Umumiy holat: <b>%s</b>\n", total))
+	}
+
+	sb.WriteString("\n<i>Kartadagi haqiqiy summani yozib, hisobni tekshirish: /balans 24 700 000</i>")
+	return sb.String()
+}
+
+// incomeBetween: income rows on days in [from, to).
+func (b *Bot) incomeBetween(ctx context.Context, from, to time.Time) (money, error) {
+	rows, err := b.pool.Query(ctx, `
+		SELECT currency, COALESCE(sum(amount_minor), 0)::bigint
+		FROM finance_entries
+		WHERE kind = 'income' AND spent_on >= $1::date AND spent_on < $2::date
+		GROUP BY currency`, from.Format("2006-01-02"), to.Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := money{}
+	for rows.Next() {
+		var cur string
+		var sum int64
+		if err := rows.Scan(&cur, &sum); err != nil {
+			return nil, err
+		}
+		m.add(cur, sum)
+	}
+	return m, rows.Err()
+}
+
+// netLine: "qoldi +7 370 000 (74%)" — income minus spending, and the share
+// of income kept. Per currency; the percentage only for so'm.
+func netLine(income, spent money) string {
+	net := money{}
+	for cur, v := range income {
+		net.add(cur, v)
+	}
+	for cur, v := range spent {
+		net.add(cur, -v)
+	}
+	parts := make([]string, 0, 2)
+	for _, cur := range []string{"UZS", "USD"} {
+		v, ok := net[cur]
+		if !ok {
+			continue
+		}
+		s := formatMoney(v, cur)
+		if v > 0 {
+			s = "+" + s
+		}
+		parts = append(parts, s)
+	}
+	if len(parts) == 0 {
+		return "0 so'm"
+	}
+	out := strings.Join(parts, " · ")
+	if inc := income["UZS"]; inc > 0 {
+		out += fmt.Sprintf(" (%d%%)", int(float64(net["UZS"])/float64(inc)*100))
+	}
+	return out
+}
+
+// monthProjection: where the month ends if spending keeps its pace. Needs
+// a few days of data to mean anything, and income to compare against.
+func monthProjection(today time.Time, income, spent money) (int64, bool) {
+	elapsed := today.Day() - 1 // whole days so far; the summary runs at 09:00
+	if elapsed < 5 || income["UZS"] == 0 {
+		return 0, false
+	}
+	daysInMonth := time.Date(today.Year(), today.Month()+1, 0, 0, 0, 0, 0, today.Location()).Day()
+	perDay := spent["UZS"] / int64(elapsed)
+	remaining := int64(daysInMonth - elapsed)
+	return income["UZS"] - spent["UZS"] - perDay*remaining, true
 }

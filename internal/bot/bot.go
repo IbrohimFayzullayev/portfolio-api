@@ -273,7 +273,7 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	case "/oxirgi":
 		b.sendRecentList(cctx, msg.Chat.ID)
 		return
-	case "/hisob", "/qarzlar", "/qarz", "/app":
+	case "/hisob", "/qarzlar", "/qarz", "/balans", "/app":
 		// Money reports carry a button that opens the same numbers as
 		// charts in the Mini App.
 		arg := strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0]))
@@ -281,6 +281,8 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		switch cmd {
 		case "/hisob":
 			text = b.financeReport(cctx, arg)
+		case "/balans":
+			text = b.balanceCommand(cctx, arg)
 		case "/app":
 			text = "📊 <b>Hisobotlar</b> — grafiklar, kategoriyalar, qarzlar va tarix."
 		default:
@@ -338,7 +340,8 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 // time only one of them is updated.
 func commandMenu() []botCommand {
 	return []botCommand{
-		{Command: "hisob", Description: "Pul: shu oy qayerga ketdi"},
+		{Command: "balans", Description: "Qo'limda qancha bor; /balans 25mln - tekshirish"},
+		{Command: "hisob", Description: "Pul: shu oy kirim, sarf, qoldi"},
 		{Command: "qarzlar", Description: "Kim kimga qarzdor"},
 		{Command: "oxirgi", Description: "Oxirgi yozuvlar, tuzatish tugmalari bilan"},
 		{Command: "app", Description: "Hisobotlarni grafik bilan ochish"},
@@ -451,6 +454,8 @@ func helpText() string {
 		"<code>Sardorga 100k berdim to'yga</code>",
 		"<code>Aliga qarz 500 ming</code> · <code>Alidan qarz oldim $200</code>",
 		"<code>Ali qaytardi 200k</code> · <code>Aliga qaytardim 200k</code>",
+		"<code>+10mln oylik</code> · <code>+500$ freelance</code> — kirim (<b>+</b> bilan)",
+		"/balans — qo'ldagi pul · /balans 25mln — haqiqiy summani yozish",
 		"/hisob [bugun|hafta|oy|o'tgan|yil|sentabr] — qayerga ketdi",
 		"/qarzlar — ochiq qarzlar · /qarzlar Ali — bitta odam",
 		"/oxirgi — oxirgi 10 ta, tuzatish va o'chirish",

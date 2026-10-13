@@ -108,6 +108,8 @@ func TestViewerTokenIsReadOnlyAndFinanceOnly(t *testing.T) {
 		{http.MethodGet, "/api/v1/system", nil},
 		{http.MethodGet, "/api/v1/auth/me", nil},
 		{http.MethodDelete, "/api/v1/posts/" + id, nil},
+		{http.MethodPost, "/api/v1/finance/checkpoints", map[string]any{"amount_minor": 1}},
+		{http.MethodDelete, "/api/v1/finance/checkpoints/" + id, nil},
 	}
 	for _, tc := range refused {
 		rec := do(t, s, tc.method, tc.path, tok, tc.body)
@@ -181,8 +183,19 @@ func TestFinanceEntryInputValidate(t *testing.T) {
 		t.Errorf("expense kept category %q", back.Category)
 	}
 
+	// Income takes an income category; a spending one falls back.
+	inc := ok()
+	inc.Kind = "income"
+	inc.normalize()
+	if inc.Category != "kirim_boshqa" {
+		t.Errorf("income with a spending category kept %q", inc.Category)
+	}
+	if err := inc.validate(today); err != nil {
+		t.Errorf("income rejected: %v", err)
+	}
+
 	bad := []func(*financeEntryInput){
-		func(i *financeEntryInput) { i.Kind = "income" },
+		func(i *financeEntryInput) { i.Kind = "salary" },
 		func(i *financeEntryInput) { i.AmountMinor = 0 },
 		func(i *financeEntryInput) { i.AmountMinor = -5 },
 		func(i *financeEntryInput) { i.Currency = "EUR" },

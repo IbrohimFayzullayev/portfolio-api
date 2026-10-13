@@ -51,6 +51,17 @@ type ErrorGroup struct {
 	MutedUntil    *time.Time `json:"muted_until"`
 }
 
+type FinanceCheckpoint struct {
+	ID            uuid.UUID `json:"id"`
+	Currency      string    `json:"currency"`
+	AmountMinor   int64     `json:"amount_minor"`
+	TakenAt       time.Time `json:"taken_at"`
+	ComputedMinor *int64    `json:"computed_minor"`
+	Note          string    `json:"note"`
+	Source        string    `json:"source"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type FinanceEntry struct {
 	ID          uuid.UUID `json:"id"`
 	Kind        string    `json:"kind"`

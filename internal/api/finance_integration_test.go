@@ -12,7 +12,7 @@ import (
 func setupFinance(t *testing.T) (*Server, string) {
 	t.Helper()
 	s := setupServer(t)
-	if _, err := s.pool.Exec(context.Background(), `TRUNCATE finance_entries`); err != nil {
+	if _, err := s.pool.Exec(context.Background(), `TRUNCATE finance_entries, finance_checkpoints`); err != nil {
 		t.Fatalf("truncate finance_entries: %v", err)
 	}
 	s.cfg.TelegramBotToken = testBotToken
@@ -158,5 +158,78 @@ func TestIntegration_FinanceSummaryAndDebts(t *testing.T) {
 		if rec := do(t, s, http.MethodGet, "/api/v1/finance/summary?"+q, admin, nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("summary?%s: %d, want 400", q, rec.Code)
 		}
+	}
+}
+
+func TestIntegration_FinanceBalance(t *testing.T) {
+	s, admin := setupFinance(t)
+
+	// Nothing counted yet: no balance, and the page knows to ask for one.
+	rec := do(t, s, http.MethodGet, "/api/v1/finance/summary?from=2026-10-01&to=2026-10-07", admin, nil)
+	var sum financeSummary
+	decode(t, rec, &sum)
+	if len(sum.Balance.Balances) != 0 || len(sum.BalanceSeries) != 0 {
+		t.Fatalf("balance before any checkpoint: %+v", sum.Balance)
+	}
+
+	// Opening balance at the start of 1 October.
+	rec = do(t, s, http.MethodPost, "/api/v1/finance/checkpoints", admin, map[string]any{
+		"currency": "UZS", "amount_minor": 2_500_000_000, "date": "2026-10-01", "note": "boshlang'ich",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("checkpoint: %d %s", rec.Code, rec.Body.String())
+	}
+
+	for _, body := range []map[string]any{
+		{"kind": "income", "amount_minor": 1_000_000_000, "currency": "UZS", "category": "oylik", "person": "", "note": "oylik", "spent_on": "2026-10-05"},
+		{"kind": "expense", "amount_minor": 3_500_000, "currency": "UZS", "category": "ovqat", "person": "", "note": "tushlik", "spent_on": "2026-10-01"},
+		{"kind": "lent", "amount_minor": 50_000_000, "currency": "UZS", "category": "", "person": "Ali", "note": "", "spent_on": "2026-10-03"},
+		// Before the opening balance: already inside it.
+		{"kind": "expense", "amount_minor": 9_000_000, "currency": "UZS", "category": "ovqat", "person": "", "note": "restoran", "spent_on": "2026-09-30"},
+	} {
+		createEntry(t, s, admin, body)
+	}
+
+	rec = do(t, s, http.MethodGet, "/api/v1/finance/summary?from=2026-10-01&to=2026-10-07", admin, nil)
+	decode(t, rec, &sum)
+	if rec.Code != http.StatusOK || len(sum.Balance.Balances) != 1 {
+		t.Fatalf("summary: %d %+v", rec.Code, sum.Balance)
+	}
+	// 25 000 000 + 10 000 000 - 35 000 - 500 000
+	if b := sum.Balance.Balances[0]; b.AmountMinor != 3_446_500_000 || b.In != 1_000_000_000 || b.Out != 53_500_000 {
+		t.Errorf("balance = %+v", b)
+	}
+	// Ali's 500 000 is still mine.
+	if sum.Balance.NetWorth["UZS"] != 3_496_500_000 {
+		t.Errorf("net worth = %v", sum.Balance.NetWorth)
+	}
+	if sum.Income["UZS"] != 1_000_000_000 || sum.Net["UZS"] != 1_000_000_000-3_500_000 {
+		t.Errorf("income = %v, net = %v", sum.Income, sum.Net)
+	}
+	if len(sum.BalanceSeries) != 7 || sum.BalanceSeries[0].AmountMinor == nil ||
+		*sum.BalanceSeries[0].AmountMinor != 2_496_500_000 {
+		t.Errorf("series day 1 = %+v", sum.BalanceSeries[0])
+	}
+
+	// A recount: the response carries what the rows said a moment before.
+	rec = do(t, s, http.MethodPost, "/api/v1/finance/checkpoints", admin, map[string]any{
+		"currency": "UZS", "amount_minor": 3_400_000_000, "date": "", "note": "",
+	})
+	var cp struct {
+		Computed *int64 `json:"computed_minor"`
+	}
+	decode(t, rec, &cp)
+	if rec.Code != http.StatusCreated || cp.Computed == nil || *cp.Computed != 3_446_500_000 {
+		t.Errorf("recount: %d computed=%v", rec.Code, cp.Computed)
+	}
+
+	// The Mini App reads the history but cannot add to it.
+	viewer := viewerToken(t, s, 42)
+	if rec := do(t, s, http.MethodGet, "/api/v1/finance/checkpoints", viewer, nil); rec.Code != http.StatusOK {
+		t.Errorf("viewer list checkpoints: %d", rec.Code)
+	}
+	if rec := do(t, s, http.MethodPost, "/api/v1/finance/checkpoints", viewer,
+		map[string]any{"amount_minor": 1}); rec.Code != http.StatusUnauthorized {
+		t.Errorf("viewer create checkpoint: %d", rec.Code)
 	}
 }

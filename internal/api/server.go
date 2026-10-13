@@ -147,12 +147,15 @@ func (s *Server) routes() *chi.Mux {
 				r.Get("/summary", s.handleFinanceSummary)
 				r.Get("/entries", s.handleListFinanceEntries)
 				r.Get("/debts", s.handleFinanceDebts)
+				r.Get("/checkpoints", s.handleListFinanceCheckpoints)
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(s.authMiddleware)
 				r.Post("/entries", s.handleCreateFinanceEntry)
 				r.Put("/entries/{id}", s.handleUpdateFinanceEntry)
 				r.Delete("/entries/{id}", s.handleDeleteFinanceEntry)
+				r.Post("/checkpoints", s.handleCreateFinanceCheckpoint)
+				r.Delete("/checkpoints/{id}", s.handleDeleteFinanceCheckpoint)
 			})
 		})
 

@@ -92,10 +92,11 @@ func addTo(m map[string]finance.Amounts, key, currency string, minor int64) {
 
 func (s *Server) handleFinanceMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"kinds":      finance.Kinds,
-		"categories": finance.Categories,
-		"currencies": []string{"UZS", "USD"},
-		"today":      todayTashkent().Format(dateLayout),
+		"kinds":             finance.Kinds,
+		"categories":        finance.Categories,
+		"income_categories": finance.IncomeCategories,
+		"currencies":        []string{"UZS", "USD"},
+		"today":             todayTashkent().Format(dateLayout),
 	})
 }
 
@@ -157,8 +158,10 @@ type dayTotal struct {
 }
 
 type monthTotal struct {
-	Month   string      `json:"month"` // "2026-10"
+	Month string `json:"month"` // "2026-10"
+	// Spent (expense + gift), as everywhere else called "amounts".
 	Amounts amountsJSON `json:"amounts"`
+	Income  amountsJSON `json:"income"`
 }
 
 type personTotal struct {
@@ -173,7 +176,14 @@ type financeSummary struct {
 	Days int    `json:"days"`
 
 	// Expense + gift: money that left and is not coming back.
-	Spent      amountsJSON          `json:"spent"`
+	Spent amountsJSON `json:"spent"`
+	// Income, and income minus spending: what was kept.
+	Income amountsJSON `json:"income"`
+	Net    amountsJSON `json:"net"`
+	// Money in hand now, and its end-of-day path through the range (so'm).
+	Balance       financeBalanceResponse `json:"balance"`
+	BalanceSeries []balancePoint         `json:"balance_series"`
+
 	ByKind     map[string]kindTotal `json:"by_kind"`
 	ByCategory []categoryTotal      `json:"by_category"`
 	ByDay      []dayTotal           `json:"by_day"`
@@ -224,6 +234,8 @@ func (s *Server) financeSummary(ctx context.Context, rng, cmp dateRange) (*finan
 		To:            rng.to.Format(dateLayout),
 		Days:          rng.days(),
 		Spent:         finance.Amounts{},
+		Income:        finance.Amounts{},
+		Net:           finance.Amounts{},
 		ByKind:        map[string]kindTotal{},
 		ByCategory:    []categoryTotal{},
 		ByDay:         []dayTotal{},
@@ -254,6 +266,11 @@ func (s *Server) financeSummary(ctx context.Context, rng, cmp dateRange) (*finan
 		counts[kind] += n
 		if finance.IsSpending(kind) {
 			out.Spent.Add(cur, sum)
+			out.Net.Add(cur, -sum)
+		}
+		if finance.IsIncome(kind) {
+			out.Income.Add(cur, sum)
+			out.Net.Add(cur, sum)
 		}
 	}
 	rows.Close()
@@ -342,23 +359,29 @@ func (s *Server) financeSummary(ctx context.Context, rng, cmp dateRange) (*finan
 	monthEnd := time.Date(rng.to.Year(), rng.to.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
 	monthStart := monthEnd.AddDate(0, -12, 0)
 	rows, err = s.pool.Query(ctx, `
-		SELECT to_char(spent_on, 'YYYY-MM'), currency, sum(amount_minor)::bigint
+		SELECT to_char(spent_on, 'YYYY-MM'), currency, kind = 'income', sum(amount_minor)::bigint
 		FROM finance_entries
-		WHERE kind IN ('expense', 'gift')
+		WHERE kind IN ('expense', 'gift', 'income')
 		  AND spent_on >= $1::date AND spent_on < $2::date
-		GROUP BY 1, currency`, monthStart.Format(dateLayout), monthEnd.Format(dateLayout))
+		GROUP BY 1, 2, 3`, monthStart.Format(dateLayout), monthEnd.Format(dateLayout))
 	if err != nil {
 		return nil, err
 	}
 	byMonth := map[string]finance.Amounts{}
+	incomeByMonth := map[string]finance.Amounts{}
 	for rows.Next() {
 		var month, cur string
+		var isIncome bool
 		var sum int64
-		if err := rows.Scan(&month, &cur, &sum); err != nil {
+		if err := rows.Scan(&month, &cur, &isIncome, &sum); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		addTo(byMonth, month, cur, sum)
+		if isIncome {
+			addTo(incomeByMonth, month, cur, sum)
+		} else {
+			addTo(byMonth, month, cur, sum)
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -366,11 +389,14 @@ func (s *Server) financeSummary(ctx context.Context, rng, cmp dateRange) (*finan
 	}
 	for m := monthStart; m.Before(monthEnd); m = m.AddDate(0, 1, 0) {
 		key := m.Format("2006-01")
-		amounts := byMonth[key]
+		amounts, income := byMonth[key], incomeByMonth[key]
 		if amounts == nil {
 			amounts = finance.Amounts{}
 		}
-		out.ByMonth = append(out.ByMonth, monthTotal{Month: key, Amounts: amounts})
+		if income == nil {
+			income = finance.Amounts{}
+		}
+		out.ByMonth = append(out.ByMonth, monthTotal{Month: key, Amounts: amounts, Income: income})
 	}
 
 	// Given away, per person.
@@ -474,6 +500,12 @@ func (s *Server) financeSummary(ctx context.Context, rng, cmp dateRange) (*finan
 		return nil, err
 	}
 	out.Debts = *debts
+
+	balance, series, err := s.financeBalance(ctx, rng)
+	if err != nil {
+		return nil, err
+	}
+	out.Balance, out.BalanceSeries = *balance, series
 
 	return out, nil
 }
@@ -696,11 +728,14 @@ func (in *financeEntryInput) normalize() {
 	in.Note = strings.TrimSpace(in.Note)
 	in.SpentOn = strings.TrimSpace(in.SpentOn)
 
-	switch {
-	case finance.IsDebt(in.Kind):
-		in.Category = "qarz"
-	case in.Category == "" || in.Category == "qarz":
-		in.Category = "boshqa"
+	// Debt rows always sit in "qarz"; a category that does not fit the kind
+	// (a lunch filed under "Oylik", say) falls back to the kind's default
+	// rather than being refused — the form may simply be out of date.
+	// An unknown key is left alone for validate() to refuse: that is a bug
+	// in the caller, not a stale choice.
+	known := in.Category == "" || finance.IsCategory(in.Category)
+	if known && !finance.CategoryFits(in.Kind, in.Category) {
+		in.Category = finance.DefaultCategory(in.Kind)
 	}
 }
 

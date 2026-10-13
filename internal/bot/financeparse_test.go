@@ -46,6 +46,18 @@ func TestParseEntry(t *testing.T) {
 		{"Aliga 50k", kindGift, 50_000_00, "UZS", "boshqa", "Ali", today},
 		{"sadaqa 20k", kindGift, 20_000_00, "UZS", "marosim", "", today},
 
+		// Money in.
+		{"+10mln oylik", kindIncome, 10_000_000_00, "UZS", "oylik", "", today},
+		{"oylik 10000000", kindIncome, 10_000_000_00, "UZS", "oylik", "", today},
+		{"maosh tushdi 12 mln", kindIncome, 12_000_000_00, "UZS", "oylik", "", today},
+		{"+500$ freelance", kindIncome, 500_00, "USD", "qoshimcha", "", today},
+		{"onamdan +300k sovg'a", kindIncome, 300_000_00, "UZS", "sovga_in", "Onam", today},
+		{"+ 2mln", kindIncome, 2_000_000_00, "UZS", "kirim_boshqa", "", today},
+		{"kecha +150k", kindIncome, 150_000_00, "UZS", "kirim_boshqa", "", yesterday},
+		// A monthly bill is not a salary.
+		{"internet oylik 100k", kindExpense, 100_000_00, "UZS", "aloqa", "", today},
+		{"obuna 1 oylik 50k", kindExpense, 50_000_00, "UZS", "aloqa", "", today},
+
 		// Loans.
 		{"Aliga qarz 500k", kindLent, 500_000_00, "UZS", "qarz", "Ali", today},
 		{"aliga 500 ming qarz berdim", kindLent, 500_000_00, "UZS", "qarz", "Ali", today},
@@ -53,6 +65,7 @@ func TestParseEntry(t *testing.T) {
 		{"Ulug'bekka $300 qarzga berdim", kindLent, 300_00, "USD", "qarz", "Ulug'bek", today},
 		{"Alidan qarz oldim 200k", kindBorrowed, 200_000_00, "UZS", "qarz", "Ali", today},
 		{"Sardordan 1 mln qarz", kindBorrowed, 1_000_000_00, "UZS", "qarz", "Sardor", today},
+		{"Ali qaytardi +200k", kindRepaidIn, 200_000_00, "UZS", "qarz", "Ali", today},
 		{"Ali qaytardi 200k", kindRepaidIn, 200_000_00, "UZS", "qarz", "Ali", today},
 		{"Ali aka 200k qaytarib berdi", kindRepaidIn, 200_000_00, "UZS", "qarz", "Ali aka", today},
 		{"Alidan 200k qaytdi", kindRepaidIn, 200_000_00, "UZS", "qarz", "Ali", today},

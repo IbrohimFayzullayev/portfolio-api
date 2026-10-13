@@ -65,3 +65,31 @@ func TestSplitEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestNetLine(t *testing.T) {
+	got := netLine(money{"UZS": 10_000_000_00}, money{"UZS": 2_630_000_00})
+	if want := "+7 370 000 so'm (73%)"; got != want {
+		t.Errorf("netLine = %q, want %q", got, want)
+	}
+	// Spending more than came in shows a minus, and a negative share.
+	got = netLine(money{"UZS": 1_000_000_00}, money{"UZS": 1_500_000_00})
+	if want := "-500 000 so'm (-50%)"; got != want {
+		t.Errorf("netLine = %q, want %q", got, want)
+	}
+}
+
+func TestMonthProjection(t *testing.T) {
+	// 11 whole days gone, 2.2 mln spent: 200k a day for the 20 days left.
+	end, ok := monthProjection(day(10, 12), money{"UZS": 10_000_000_00}, money{"UZS": 2_200_000_00})
+	if !ok || end != 3_800_000_00 {
+		t.Errorf("projection = %d, %v", end, ok)
+	}
+	// Too early in the month to say anything.
+	if _, ok := monthProjection(day(10, 3), money{"UZS": 1}, money{"UZS": 1}); ok {
+		t.Error("projection on the 3rd")
+	}
+	// Without income there is nothing to project against.
+	if _, ok := monthProjection(day(10, 20), money{}, money{"UZS": 1}); ok {
+		t.Error("projection without income")
+	}
+}

@@ -46,8 +46,9 @@ func (b *Bot) ask(ctx context.Context, chatID int64, intent, targetID, text, pla
 
 // answerPrompt applies a reply to whatever question it answers. The empty
 // string means "this reply was not to one of ours" — the caller then treats
-// the message normally.
-func (b *Bot) answerPrompt(ctx context.Context, chatID, replyTo int64, text string) string {
+// the message normally. The keyboard is set when the answer redraws a card
+// that has buttons of its own (a money entry).
+func (b *Bot) answerPrompt(ctx context.Context, chatID, replyTo int64, text string) (string, *inlineKeyboard) {
 	var intent, targetID string
 
 	// DELETE ... RETURNING: a question is answered once. Doing it in one
@@ -57,15 +58,18 @@ func (b *Bot) answerPrompt(ctx context.Context, chatID, replyTo int64, text stri
 		WHERE chat_id = $1 AND message_id = $2 AND expires_at > now()
 		RETURNING intent, target_id`, chatID, replyTo).Scan(&intent, &targetID)
 	if err != nil {
-		return "" // no such prompt, or it has expired
+		return "", nil // no such prompt, or it has expired
 	}
 
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return "Bo'sh javob — hech narsa o'zgarmadi."
+		return "Bo'sh javob — hech narsa o'zgarmadi.", nil
 	}
 
-	return b.applyEdit(ctx, intent, targetID, text)
+	if strings.HasPrefix(intent, "fin.") {
+		return b.applyFinanceEdit(ctx, intent, targetID, text)
+	}
+	return b.applyEdit(ctx, intent, targetID, text), nil
 }
 
 // forgetExpiredPrompts keeps the table from growing without bound. Run from

@@ -226,8 +226,8 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	// An answer to something the bot asked. The question is identified by the
 	// message it replies to, so no state had to survive in this process.
 	if msg.ReplyToMessage != nil {
-		if reply := b.answerPrompt(cctx, msg.Chat.ID, msg.ReplyToMessage.MessageID, msg.Text); reply != "" {
-			if err := b.tg.sendMessage(cctx, msg.Chat.ID, reply); err != nil {
+		if reply, markup := b.answerPrompt(cctx, msg.Chat.ID, msg.ReplyToMessage.MessageID, msg.Text); reply != "" {
+			if err := b.tg.sendMessageMarkup(cctx, msg.Chat.ID, reply, markup); err != nil {
 				log.Printf("bot: sendMessage failed: %v", err)
 			}
 			return
@@ -238,6 +238,14 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	// A photo or sticker arrives with no text at all — Fields would be empty.
 	fields := strings.Fields(msg.Text)
 	if len(fields) == 0 {
+		return
+	}
+
+	// Anything that is not a command is a money entry: "tushlik 35k". This
+	// is the one path that has to cost nothing to use, so it needs no prefix.
+	if !strings.HasPrefix(fields[0], "/") {
+		b.recordEntry(cctx, msg.Chat.ID, msg.Text)
+		log.Printf("bot: entry took %s", time.Since(started).Round(time.Millisecond))
 		return
 	}
 	cmd := strings.ToLower(fields[0])
@@ -254,6 +262,9 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 	case "/xatolar":
 		// Same: each group carries its own mute button.
 		b.sendErrorsList(cctx, msg.Chat.ID)
+		return
+	case "/oxirgi":
+		b.sendRecentList(cctx, msg.Chat.ID)
 		return
 	case "/tahrir":
 		b.sendEditCard(cctx, msg.Chat.ID,
@@ -277,6 +288,10 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 		reply = b.invitationsReport(cctx)
 	case "/kunlik":
 		reply = b.dailySummary(cctx)
+	case "/hisob":
+		reply = b.financeReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
+	case "/qarzlar", "/qarz":
+		reply = b.debtsReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	case "/stat":
 		reply = b.statsReport(cctx, strings.TrimSpace(strings.TrimPrefix(msg.Text, fields[0])))
 	case "/xato":
@@ -303,6 +318,9 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 // time only one of them is updated.
 func commandMenu() []botCommand {
 	return []botCommand{
+		{Command: "hisob", Description: "Pul: shu oy qayerga ketdi"},
+		{Command: "qarzlar", Description: "Kim kimga qarzdor"},
+		{Command: "oxirgi", Description: "Oxirgi yozuvlar, tuzatish tugmalari bilan"},
 		{Command: "status", Description: "Stack holati va uptime"},
 		{Command: "posts", Description: "Oxirgi postlar, nashr tugmalari bilan"},
 		{Command: "tahrir", Description: "Postni tahrirlash kartasi"},
@@ -348,6 +366,14 @@ func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
 		redraw func(context.Context) (string, *inlineKeyboard)
 	)
 	switch action {
+	case "fn", "fc", "fk":
+		// Money entries: the card, its pickers and its edit questions.
+		var r redrawFunc
+		notice, r = b.financeCallback(cctx, chatID, action, arg)
+		if r != nil {
+			redraw = r
+		}
+
 	case "mute":
 		notice = b.muteError(cctx, arg)
 		redraw = b.errorsList
@@ -398,6 +424,15 @@ func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
 func helpText() string {
 	return strings.Join([]string{
 		"<b>Platforma boti</b>",
+		"",
+		"<b>Hisob-kitob</b> — buyruqsiz, shunchaki yozing:",
+		"<code>tushlik 35k</code> · <code>kecha taksi 18000</code>",
+		"<code>Sardorga 100k berdim to'yga</code>",
+		"<code>Aliga qarz 500 ming</code> · <code>Alidan qarz oldim $200</code>",
+		"<code>Ali qaytardi 200k</code> · <code>Aliga qaytardim 200k</code>",
+		"/hisob [bugun|hafta|oy|o'tgan|yil|sentabr] — qayerga ketdi",
+		"/qarzlar — ochiq qarzlar · /qarzlar Ali — bitta odam",
+		"/oxirgi — oxirgi 10 ta, tuzatish va o'chirish",
 		"",
 		"<b>Kontent</b>",
 		"/posts — oxirgi postlar, nashr tugmalari bilan",

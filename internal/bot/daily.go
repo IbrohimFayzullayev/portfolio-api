@@ -53,26 +53,19 @@ func (b *Bot) dailySummary(ctx context.Context) string {
 	sb.WriteString(fmt.Sprintf("<b>Kunlik hisobot</b> — %s\n",
 		time.Now().In(tashkent).Format("02.01.2006")))
 
-	var invToday, invTotal int64
-	err := b.pool.QueryRow(ctx, `
-		SELECT
-			count(*) FILTER (WHERE created_at >= date_trunc('day', now())),
-			count(*)
-		FROM invitations`).Scan(&invToday, &invTotal)
-	if err != nil {
-		sb.WriteString("\n💌 taklifnomalar: o'qib bo'lmadi\n")
-	} else {
-		sb.WriteString(fmt.Sprintf("\n💌 Taklifnoma: bugun %d · jami %d\n", invToday, invTotal))
-	}
+	// Money first: it is the one section that changes every day. Left out
+	// entirely until something has been written down, so the summary does not
+	// open with a row of zeros.
+	sb.WriteString(b.financeDailySection(ctx))
 
 	var published, drafts int64
-	err = b.pool.QueryRow(ctx, `
+	err := b.pool.QueryRow(ctx, `
 		SELECT
 			count(*) FILTER (WHERE NOT draft),
 			count(*) FILTER (WHERE draft)
 		FROM posts`).Scan(&published, &drafts)
 	if err == nil {
-		sb.WriteString(fmt.Sprintf("📝 Post: %d nashr · %d qoralama\n", published, drafts))
+		sb.WriteString(fmt.Sprintf("\n📝 Post: %d nashr · %d qoralama\n", published, drafts))
 	}
 
 	// Content with no counterpart in the other language — the number the

@@ -51,6 +51,21 @@ type ErrorGroup struct {
 	MutedUntil    *time.Time `json:"muted_until"`
 }
 
+type FinanceEntry struct {
+	ID          uuid.UUID `json:"id"`
+	Kind        string    `json:"kind"`
+	AmountMinor int64     `json:"amount_minor"`
+	Currency    string    `json:"currency"`
+	Category    string    `json:"category"`
+	Person      string    `json:"person"`
+	Note        string    `json:"note"`
+	RawText     string    `json:"raw_text"`
+	SpentOn     time.Time `json:"spent_on"`
+	Source      string    `json:"source"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type HealthCheck struct {
 	ID        int64     `json:"id"`
 	Target    string    `json:"target"`

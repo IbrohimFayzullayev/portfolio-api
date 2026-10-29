@@ -541,6 +541,10 @@ func (b *Bot) answerPrompt(ctx context.Context, u *user, chatID, replyTo int64, 
 	if text == "" {
 		return "Bo'sh javob - hech narsa o'zgarmadi.", nil, true
 	}
+	if intent == "bal.set" {
+		// The first-run balance question: the same as typing /balans 5mln.
+		return b.balanceCommand(ctx, u, text), b.webAppKeyboard("📊 Hisobotni ochish"), true
+	}
 	reply, markup := b.applyEdit(ctx, u, intent, targetID, text, today)
 	return reply, markup, true
 }

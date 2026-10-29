@@ -257,3 +257,47 @@ func (c *telegramClient) setMyCommands(ctx context.Context, commands []botComman
 func escapeHTML(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
+
+/* ----------------------------- reply keyboard ----------------------------- */
+
+// replyKeyboard is the menu under the input box. Its buttons send their own
+// label as a message; handleMessage maps the labels back to commands.
+type replyKeyboard struct {
+	Keyboard              [][]keyboardButton `json:"keyboard"`
+	IsPersistent          bool               `json:"is_persistent"`
+	ResizeKeyboard        bool               `json:"resize_keyboard"`
+	InputFieldPlaceholder string             `json:"input_field_placeholder,omitempty"`
+}
+
+type keyboardButton struct {
+	Text string `json:"text"`
+}
+
+func (c *telegramClient) sendMessageWithKeyboard(ctx context.Context, chatID int64, text string, kb *replyKeyboard) error {
+	body := map[string]any{
+		"chat_id":                  chatID,
+		"text":                     text,
+		"parse_mode":               "HTML",
+		"disable_web_page_preview": true,
+	}
+	if kb != nil {
+		body["reply_markup"] = kb
+	}
+	return c.call(ctx, "sendMessage", body, nil)
+}
+
+/* --------------------------------- profile -------------------------------- */
+
+// The bot's name and the two descriptions. Telegram rate-limits setting
+// them, so each is read first and written only when it differs.
+
+func (c *telegramClient) syncField(ctx context.Context, get, set, field, want string) (bool, error) {
+	var current map[string]string
+	if err := c.call(ctx, get, map[string]any{}, &current); err != nil {
+		return false, err
+	}
+	if current[field] == want {
+		return false, nil
+	}
+	return true, c.call(ctx, set, map[string]any{field: want}, nil)
+}

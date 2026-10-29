@@ -145,7 +145,7 @@ func (b *Bot) handleStart(ctx context.Context, msg *Message, code string) {
 	}
 
 	if u != nil && u.Status == statusPending {
-		b.send(ctx, chatID, "⏳ So'rovingiz hali ko'rib chiqilmoqda. Ruxsat berilgach shu yerga xabar keladi.", nil)
+		b.send(ctx, chatID, "⏳ So'rovingiz ko'rib chiqilmoqda. Ruxsat berilishi bilan shu yerga xabar keladi.", nil)
 		return
 	}
 
@@ -158,11 +158,11 @@ func (b *Bot) handleStart(ctx context.Context, msg *Message, code string) {
 		return
 	}
 	b.send(ctx, chatID, strings.Join([]string{
-		"Assalomu alaykum! 👋",
+		"👋 <b>Assalomu alaykum!</b>",
 		"",
-		"Bu - shaxsiy hisob-kitob boti: xarajat, kirim va qarzlarni bitta xabar bilan yozib borasiz, hisobot va grafiklar avtomatik chiqadi.",
+		"Men <b>Hamyon</b> - shaxsiy pul hisobchingiz. Xarajat, kirim va qarzlarni oddiy xabar bilan yozasiz, hisobot va grafiklarni men tayyorlayman.",
 		"",
-		"Bot hozircha taklif bilan ishlaydi. So'rovingiz yuborildi - ruxsat berilgach shu yerga xabar keladi.",
+		"Hozircha taklif bilan ishlayman. ✉️ So'rovingiz yuborildi - ruxsat berilishi bilan shu yerga xabar keladi.",
 	}, "\n"), nil)
 
 	if b.cfg.AdminID != 0 {
@@ -224,31 +224,6 @@ func (b *Bot) redeemInvite(ctx context.Context, from *User, code string) (bool, 
 		return false, err
 	}
 	return true, tx.Commit(ctx)
-}
-
-func (b *Bot) sendWelcome(ctx context.Context, chatID int64, isAdmin, first bool) {
-	head := "👋 <b>Xush kelibsiz!</b>"
-	if !first {
-		head = "👋 <b>Davom etamiz.</b>"
-	}
-	text := strings.Join([]string{
-		head,
-		"",
-		"Pul harakatini oddiy xabar bilan yozing:",
-		"<code>tushlik 35k</code>",
-		"<code>+10mln oylik</code>",
-		"<code>Aliga qarz 500k</code>",
-		"",
-		"Boshlashdan oldin qo'lingizda (karta + naqd) qancha borligini bir marta yozing: <code>/balans 5mln</code>. Shundan keyin har kirim qo'shiladi, har xarajat ayriladi.",
-		"",
-		b.privacyLine(),
-		"",
-		"Batafsil: /help · Grafiklar: chap pastdagi <b>Hisobot</b> tugmasi.",
-	}, "\n")
-	if isAdmin {
-		text += "\n\n<i>Admin: /taklif - do'stingizga havola, /foydalanuvchilar - ro'yxat.</i>"
-	}
-	b.send(ctx, chatID, text, b.webAppKeyboard("📊 Hisobotni ochish"))
 }
 
 /* ---------------------------------- admin --------------------------------- */

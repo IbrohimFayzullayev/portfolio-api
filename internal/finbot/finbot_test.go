@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestReportPeriod(t *testing.T) {
@@ -113,5 +114,48 @@ func TestCallbackDataFitsTelegramLimit(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestBrandFitsTelegramLimits(t *testing.T) {
+	for _, c := range []struct {
+		name, text string
+		max        int
+	}{
+		{"name", brandName, 64},
+		{"short description", brandShortDescription, 120},
+		{"description", brandDescription, 512},
+	} {
+		if n := utf8.RuneCountInString(c.text); n > c.max {
+			t.Errorf("%s is %d characters, Telegram allows %d", c.name, n, c.max)
+		}
+	}
+}
+
+func TestNoLongDashesInUserText(t *testing.T) {
+	b := &Bot{}
+	for _, s := range []string{brandName, brandShortDescription, brandDescription,
+		b.helpText(true), examplesText(), b.privacyLine()} {
+		if strings.ContainsAny(s, "—–") {
+			t.Errorf("long dash in user-facing text: %q", s)
+		}
+	}
+}
+
+func TestMenuButtonsMapToCommands(t *testing.T) {
+	kb := mainKeyboard()
+	if !kb.IsPersistent || len(kb.Keyboard) == 0 {
+		t.Fatalf("keyboard = %+v", kb)
+	}
+	for _, row := range kb.Keyboard {
+		for _, btn := range row {
+			cmd, ok := menuCommand(btn.Text)
+			if !ok || !strings.HasPrefix(cmd, "/") {
+				t.Errorf("button %q maps to %q", btn.Text, cmd)
+			}
+		}
+	}
+	if _, ok := menuCommand("tushlik 35k"); ok {
+		t.Error("an ordinary entry was taken for a menu button")
 	}
 }

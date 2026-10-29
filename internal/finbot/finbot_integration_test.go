@@ -249,7 +249,7 @@ func TestIntegration_AccessByApproval(t *testing.T) {
 		t.Fatal("a non-admin approved someone")
 	}
 	h.press(adminID, "adm:ok:"+strconv.FormatInt(strangerID, 10))
-	h.mustContain(textOf(h.tg.take(strangerID)), "Xush kelibsiz")
+	h.mustContain(textOf(h.tg.take(strangerID)), "xush kelibsiz")
 	h.mustContain(h.say(strangerID, "tushlik 35k"), "35 000 so'm", "Ovqat")
 
 	// Blocked: silence.
@@ -264,7 +264,7 @@ var linkRe = regexp.MustCompile(`start=([a-z0-9]+)`)
 
 func TestIntegration_InviteLink(t *testing.T) {
 	h := newHarness(t)
-	h.mustContain(h.say(adminID, "/start"), "Xush kelibsiz", "/taklif")
+	h.mustContain(h.say(adminID, "/start"), "xush kelibsiz", "/taklif")
 
 	// Only the admin may make links.
 	h.mustContain(h.say(aliID, "/taklif"), "Assalomu")
@@ -273,7 +273,7 @@ func TestIntegration_InviteLink(t *testing.T) {
 	if m == nil {
 		t.Fatalf("no link in %q", reply)
 	}
-	h.mustContain(h.say(aliID, "/start "+m[1]), "Xush kelibsiz")
+	h.mustContain(h.say(aliID, "/start "+m[1]), "xush kelibsiz")
 	h.mustContain(textOf(h.tg.take(adminID)), "taklif havolasi orqali qo'shildi")
 
 	// Spent: the next person is asked to wait instead.
@@ -596,7 +596,7 @@ func TestIntegration_AdminAPI(t *testing.T) {
 		t.Fatalf("approve = %d %v", code, out)
 	}
 	welcome := textOf(h.tg.take(strangerID))
-	h.mustContain(welcome, "Xush kelibsiz", "boshqa foydalanuvchilar ko'rmaydi")
+	h.mustContain(welcome, "xush kelibsiz", "boshqa foydalanuvchilar ko'rmaydi")
 	// While the admin can see amounts, the bot must not claim otherwise.
 	if strings.Contains(welcome, "bot egasi ham") {
 		t.Errorf("welcome promises the owner cannot see, but AdminSeesMoney is on:\n%s", welcome)
@@ -617,4 +617,36 @@ func TestIntegration_AdminAPI(t *testing.T) {
 		t.Errorf("failure texts shown while money is hidden")
 	}
 	h.mustContain(h.say(aliID, "/help"), "bot egasi ham bot orqali ko'rmaydi")
+}
+
+func TestIntegration_OnboardingAndMenu(t *testing.T) {
+	h := newHarness(t)
+	h.mustContain(h.say(adminID, "/start"), "xush kelibsiz", "1-qadam")
+
+	// Messages sent with the menu carry the reply keyboard.
+	h.b.sendWithMenu(context.Background(), adminID, "x")
+	calls := h.tg.take(adminID)
+	if len(calls) != 1 || calls[0].Body["reply_markup"] == nil {
+		t.Fatalf("menu keyboard missing: %+v", calls)
+	}
+
+	// "Balansni kiritish" asks; the reply records the opening balance.
+	h.press(adminID, "ob:bal")
+	var mid int64
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT message_id FROM prompts WHERE intent = 'bal.set'`).Scan(&mid); err != nil {
+		t.Fatalf("no balance prompt: %v", err)
+	}
+	h.mustContain(h.sayAt(adminID, "5mln", h.now, mid), "Balans yozildi: 5 000 000 so'm")
+
+	// A tap on a menu button is its command, not a money entry.
+	h.say(adminID, "tushlik 35k")
+	h.mustContain(h.say(adminID, "📊 Hisobot"), "Sarflandi", "35 000 so'm")
+	h.mustContain(h.say(adminID, "💼 Balans"), "4 965 000 so'm")
+	if n := h.count(`SELECT count(*) FROM entries`); n != 1 {
+		t.Errorf("entries = %d, want 1 (menu taps must not become entries)", n)
+	}
+	if n := h.count(`SELECT count(*) FROM parse_failures`); n != 0 {
+		t.Errorf("menu taps were recorded as parse failures: %d", n)
+	}
 }

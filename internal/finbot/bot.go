@@ -86,6 +86,7 @@ func (b *Bot) Run(ctx context.Context) error {
 			log.Printf("finbot: could not set the admin command menu: %v", err)
 		}
 	}
+	b.syncProfile(ctx)
 	if err := b.tg.setChatMenuButton(ctx, b.menuButton()); err != nil {
 		log.Printf("finbot: could not set the menu button: %v", err)
 	}
@@ -186,6 +187,10 @@ func (b *Bot) handle(ctx context.Context, u Update) {
 func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 	chatID := msg.Chat.ID
 	text := strings.TrimSpace(msg.Text)
+	// A tap on the menu under the input box arrives as its label.
+	if command, ok := menuCommand(text); ok {
+		text = command
+	}
 	fields := strings.Fields(text)
 	cmd := ""
 	if len(fields) > 0 && strings.HasPrefix(fields[0], "/") {
@@ -217,7 +222,7 @@ func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 	case u.Status == statusBlocked:
 		return // no answer at all
 	case u.Status == statusPending:
-		b.send(ctx, chatID, "⏳ So'rovingiz hali ko'rib chiqilmoqda. Ruxsat berilgach shu yerga xabar keladi.", nil)
+		b.send(ctx, chatID, "⏳ So'rovingiz ko'rib chiqilmoqda. Ruxsat berilishi bilan shu yerga xabar keladi.", nil)
 		return
 	}
 	b.touch(ctx, u)
@@ -244,8 +249,10 @@ func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 
 	isAdmin := msg.From.ID == b.cfg.AdminID
 	switch cmd {
-	case "/help", "/yordam":
-		b.send(ctx, chatID, b.helpText(isAdmin), nil)
+	case "/help", "/yordam", "/menu":
+		// Sent with the menu keyboard, so /help also brings the menu back
+		// for someone who closed it.
+		b.sendWithMenu(ctx, chatID, b.helpText(isAdmin))
 	case "/oxirgi":
 		t, m := b.recentList(ctx, u)
 		b.send(ctx, chatID, t, m)
@@ -304,6 +311,8 @@ func (b *Bot) handleCallback(ctx context.Context, q *CallbackQuery) {
 			notice, redraw = b.financeCallback(ctx, u, chatID, action, arg)
 		case "del":
 			notice, redraw = b.deleteAllCallback(ctx, u, arg)
+		case "ob":
+			notice, redraw = b.onboardingCallback(ctx, u, chatID, arg)
 		default:
 			notice = "Eski tugma"
 		}
@@ -377,46 +386,4 @@ func (b *Bot) privacyLine() string {
 		return "🔒 Yozuvlaringizni boshqa foydalanuvchilar ko'rmaydi."
 	}
 	return "🔒 Yozuvlaringizni boshqa foydalanuvchilar ham, bot egasi ham bot orqali ko'rmaydi - admin faqat kim qachon foydalanganini ko'radi."
-}
-
-func (b *Bot) helpText(isAdmin bool) string {
-	lines := []string{
-		"<b>Hisob-kitob boti</b>",
-		"",
-		"Buyruqsiz, shunchaki yozing - har xabar bitta yozuv:",
-		"<code>tushlik 35k</code> · <code>kecha taksi 18000</code>",
-		"<code>korzinka 245 000</code> · <code>vps $12</code>",
-		"<code>+10mln oylik</code> · <code>+500$ freelance</code> - kirim (<b>+</b> bilan)",
-		"<code>Sardorga 100k berdim to'yga</code> - qaytmaydigan berish",
-		"",
-		"<b>Qarzlar</b>",
-		"<code>Aliga qarz 500k</code> - siz berdingiz",
-		"<code>Alidan qarz oldim 1mln</code> - siz oldingiz",
-		"<code>Ali qaytardi 200k</code> - sizga qaytardi",
-		"<code>Aliga qaytardim 200k</code> - siz qaytardingiz",
-		"",
-		"Bir nechtasini alohida qatorlarda bitta xabarda yuborsa ham bo'ladi.",
-		"Sana: <code>kecha</code>, <code>o'tgan kuni</code>, <code>12.10</code>.",
-		"Har yozuvdan keyin karta chiqadi - noto'g'ri tushungan bo'lsam, tugma bilan tuzating.",
-		"",
-		"<b>Hisobotlar</b>",
-		"/hisob - shu oy · /hisob hafta · o'tgan · yil · sentabr",
-		"/balans - qo'ldagi pul · <code>/balans 5mln</code> - haqiqiy summani yozish",
-		"/qarzlar - ochiq qarzlar · <code>/qarzlar Ali</code> - bitta odam tarixi",
-		"/oxirgi - oxirgi 10 ta, tuzatish va o'chirish",
-		"/app - grafiklar, filtr va tahrirlash (Telegram ichida)",
-		"/xulosa off - ertalabki xabarni o'chirish",
-		"/ochirish - barcha ma'lumotlarimni o'chirish",
-		"",
-		b.privacyLine(),
-	}
-	if isAdmin {
-		lines = append(lines, "",
-			"<b>Admin</b>",
-			"/taklif [izoh] - bir martalik havola (7 kun)",
-			"/foydalanuvchilar - ro'yxat va kutayotganlar",
-			"/ruxsat &lt;telegram id&gt; · /bloklash &lt;telegram id&gt;",
-		)
-	}
-	return strings.Join(lines, "\n")
 }

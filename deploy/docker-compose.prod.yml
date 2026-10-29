@@ -154,7 +154,10 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    depends_on: [web, dashboard, api, umami, finbot]
+    # finbot is deliberately NOT here. Caddy is the one door to every site;
+    # if it waits on a service that cannot start, everything goes dark with
+    # it. A missing upstream should be a 502 on its own domain, nothing more.
+    depends_on: [web, dashboard, api, umami]
     ports:
       - "80:80"
       - "443:443"

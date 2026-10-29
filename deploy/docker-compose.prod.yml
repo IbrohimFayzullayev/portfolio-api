@@ -165,10 +165,16 @@ services:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN}
       API_DOMAIN: ${API_DOMAIN}
-      STATS_DOMAIN: ${STATS_DOMAIN}
+      # Defaults here, not only in the Caddyfile: compose passes an unset
+      # variable as an EMPTY one, and Caddy's {$VAR:default} applies only to
+      # a variable that is missing altogether. An empty address breaks the
+      # whole Caddyfile (see the comment on the Umami block there).
+      STATS_DOMAIN: ${STATS_DOMAIN:-stats.fayzullayev.uz}
       FINBOT_DOMAIN: ${FINBOT_DOMAIN:-hisob.fayzullayev.uz}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Other projects' site blocks (see the end of the Caddyfile).
+      - ./caddy-sites:/etc/caddy/sites:ro
       - caddy_data:/data
       - caddy_config:/config
     networks: [internal]

@@ -22,7 +22,14 @@
 
 # Analytics (Umami). Same certificate machinery as the rest; the dashboard
 # behind it is password-protected by Umami itself.
-{$STATS_DOMAIN} {
+#
+# The default matters: with STATS_DOMAIN unset, a bare {$STATS_DOMAIN} turns
+# this into a block with no address, which Caddy reads as the global options
+# block - allowed only first - and refuses the WHOLE file. Every site went
+# down with it on 2026-10-29. Every {$VAR} used as an address needs a default
+# - and in docker-compose.prod.yml too, because compose passes an unset
+# variable as an empty one, and Caddy's default covers only a missing one.
+{$STATS_DOMAIN:stats.fayzullayev.uz} {
 	encode gzip zstd
 	reverse_proxy umami:3000
 }
@@ -34,8 +41,8 @@
 # DASHBOARD_DOMAIN only.
 #
 # The default keeps this block's address a real name even before
-# FINBOT_DOMAIN is set in .env, so a missing variable can never turn it into
-# an empty (catch-all) site that clashes with another block.
+# FINBOT_DOMAIN is set in .env (see the Umami block above for what an empty
+# address does).
 {$FINBOT_DOMAIN:hisob.fayzullayev.uz} {
 	encode gzip zstd
 
@@ -50,6 +57,15 @@
 		reverse_proxy dashboard:3001
 	}
 	handle {
-		redir /pul
+		# The "*" is required: a first argument starting with "/" is read as
+		# a path matcher, and "redir /pul" alone has no target at all.
+		redir * /pul
 	}
 }
+
+# Other projects on this server (ranklo.uz, ...), one file each in
+# /opt/portfolio/caddy-sites/ on the host. They live outside this file on
+# purpose: this file is copied from the repo, and on 2026-10-29 copying it
+# over the server's version deleted ranklo's blocks and took ranklo down.
+# A glob with no matching files is only a warning.
+import /etc/caddy/sites/*.caddy

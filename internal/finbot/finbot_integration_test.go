@@ -595,7 +595,12 @@ func TestIntegration_AdminAPI(t *testing.T) {
 	if code, out := h.adminCall("POST", strangerPath+"/status", "secret-key", map[string]string{"status": "active"}); code != http.StatusOK {
 		t.Fatalf("approve = %d %v", code, out)
 	}
-	h.mustContain(textOf(h.tg.take(strangerID)), "Xush kelibsiz", "Bot egasi (admin)")
+	welcome := textOf(h.tg.take(strangerID))
+	h.mustContain(welcome, "Xush kelibsiz", "boshqa foydalanuvchilar ko'rmaydi")
+	// While the admin can see amounts, the bot must not claim otherwise.
+	if strings.Contains(welcome, "bot egasi ham") {
+		t.Errorf("welcome promises the owner cannot see, but AdminSeesMoney is on:\n%s", welcome)
+	}
 
 	// Money hidden: who and how often, never how much.
 	h.b.cfg.AdminSeesMoney = false

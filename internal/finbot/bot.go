@@ -368,11 +368,13 @@ func (b *Bot) webAppKeyboard(label string) *inlineKeyboard {
 	}}}
 }
 
-// privacyLine tells people plainly who can see their records. It follows
-// AdminSeesMoney, so turning that off changes what the bot promises.
+// privacyLine tells people who can see their records. It follows
+// AdminSeesMoney and never promises more than is true: while the admin can
+// see amounts it says only that other users cannot; the stronger "the
+// owner cannot either" is said only when FINBOT_ADMIN_SEES_MONEY=false.
 func (b *Bot) privacyLine() string {
 	if b.cfg.AdminSeesMoney {
-		return "🔒 Yozuvlaringizni boshqa foydalanuvchilar ham, bot egasi ham bot orqali ko'rmaydi - admin faqat kim qachon foydalanganini ko'radi."
+		return "🔒 Yozuvlaringizni boshqa foydalanuvchilar ko'rmaydi."
 	}
 	return "🔒 Yozuvlaringizni boshqa foydalanuvchilar ham, bot egasi ham bot orqali ko'rmaydi - admin faqat kim qachon foydalanganini ko'radi."
 }

@@ -64,7 +64,10 @@ jobs:
 
       # Integration tests skip themselves without this; with the service above
       # they run for real against a throwaway database.
-      - run: go test ./... -count=1
+      # -p 1: the API's, the ops bot's and the finance bot's integration
+      # tests share this one PostgreSQL; run side by side they clean each
+      # other's tables and fail at random.
+      - run: go test ./... -count=1 -p 1
         env:
           TEST_DATABASE_URL: postgres://portfolio:portfolio@localhost:5432/portfolio_test?sslmode=disable
 
@@ -127,10 +130,10 @@ jobs:
             # The image tag is pinned to this commit rather than `latest`, so a
             # rollback is `TAG=<previous sha> docker compose up -d api`.
             export TAG="${{ github.sha }}"
-            # Both services, because both ship from this image: the bot is the
-            # same binary with a different entrypoint. Updating only the API
-            # would leave the bot running whatever it was started with, which
-            # looks exactly like a successful deploy.
+            # Every service that ships from this image: the ops bot and the
+            # finance bot are binaries in it with their own entrypoints.
+            # Updating only the API would leave the bots running whatever they
+            # were started with, which looks exactly like a successful deploy.
             # Pull with a token minted for this run, kept in a throwaway docker
             # config. The server used to rely on a personal access token from a
             # one-off `docker login`; when that expired, every deploy failed with
@@ -152,7 +155,14 @@ jobs:
             # applies to every service in the file, so a dependency must never
             # be resolved at this deploy's tag. db is a fixed image and is
             # already running.
-            docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps api bot
+            # finbot only once the server's compose file has it: that file is
+            # copied by hand (runbook), and naming a service it does not know
+            # would fail the whole deploy, API included.
+            svcs="api bot"
+            if docker compose -f docker-compose.prod.yml --env-file .env config --services | grep -qx finbot; then
+              svcs="$svcs finbot"
+            fi
+            docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps $svcs
 
             # A 200 from the site proves SOMETHING is answering, not that it is
             # the new build — the previous container answers 200 just as well.
@@ -160,7 +170,7 @@ jobs:
             # pulled, so a deploy that quietly kept the old image fails here
             # instead of being reported green.
             want=$(docker image inspect "$REGISTRY/portfolio-api:$TAG" --format '{{.Id}}')
-            for svc in api bot; do
+            for svc in $svcs; do
               got=$(docker inspect "$(docker compose -f docker-compose.prod.yml ps -q $svc)" --format '{{.Image}}')
               if [ "$want" != "$got" ]; then
                 echo "FAILED: $svc is still running $got, expected $want"

@@ -24,6 +24,11 @@ type Config struct {
 	// container already has.
 	TelegramBotToken   string
 	TelegramAllowedIDs []int64
+
+	// The finance bot's admin API, reached over the Docker network. Both
+	// set: the dashboard's "Moliya boti" pages work; key empty: /finbot is 404.
+	FinbotInternalURL string
+	FinbotAdminKey    string
 }
 
 // TelegramWebAppEnabled reports whether the Mini App can sign anyone in.
@@ -61,6 +66,9 @@ func Load() (*Config, error) {
 		CORSOrigins: splitAndTrim(getenv("CORS_ORIGINS", "http://localhost:3001")),
 
 		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+
+		FinbotInternalURL: strings.TrimSuffix(getenv("FINBOT_INTERNAL_URL", "http://finbot:8090"), "/"),
+		FinbotAdminKey:    strings.TrimSpace(os.Getenv("FINBOT_ADMIN_KEY")),
 	}
 
 	// The same format the bot reads: one id, or several separated by commas.

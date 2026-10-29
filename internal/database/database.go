@@ -29,6 +29,13 @@ func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // It tracks applied versions in the schema_migrations table, so it is safe to
 // run on every startup.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) (applied []string, err error) {
+	return MigrateFS(ctx, pool, migrations.FS, "migrations")
+}
+
+// MigrateFS is Migrate for another set of migrations: every *.up.sql in dir,
+// in name order. The finance bot keeps its own database and its own
+// migrations (db/finbot), and applies them with the same runner.
+func MigrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir string) (applied []string, err error) {
 	if _, err = pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version    text PRIMARY KEY,
@@ -37,7 +44,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) (applied []string, err err
 		return nil, fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	entries, err := fs.ReadDir(migrations.FS, "migrations")
+	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +71,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) (applied []string, err err
 			continue
 		}
 
-		content, readErr := fs.ReadFile(migrations.FS, "migrations/"+name)
+		content, readErr := fs.ReadFile(fsys, dir+"/"+name)
 		if readErr != nil {
 			return applied, readErr
 		}

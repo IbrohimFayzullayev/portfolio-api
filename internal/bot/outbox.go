@@ -476,6 +476,11 @@ func (b *Bot) renderNotification(n notification) string {
 	case "backup.finished":
 		text := fmt.Sprintf("💾 <b>Backup</b>\n\n%s · %s",
 			escapeHTML(str(n.payload, "size")), escapeHTML(str(n.payload, "duration")))
+		// Other databases dumped beside the main one ("finbot 12K"), from a
+		// backup.sh that knows about them.
+		if extra := str(n.payload, "extra"); extra != "" {
+			text += "\n+ " + escapeHTML(extra)
+		}
 		// Says which kind of backup this was. A dump that only exists next to
 		// the database it copies should not read the same as one that left
 		// the building. Rows from an older backup.sh have no field at all and

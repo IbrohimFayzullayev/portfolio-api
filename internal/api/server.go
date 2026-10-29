@@ -201,6 +201,15 @@ func (s *Server) routes() *chi.Mux {
 			// One read-only snapshot of how the stack is doing.
 			r.Get("/system", s.handleSystemOverview)
 
+			// The finance bot's users and their reports, forwarded to the
+			// finance bot itself (finbot_proxy.go). Admin session only.
+			r.Route("/finbot", func(r chi.Router) {
+				r.Get("/users", s.handleFinbotProxy)
+				r.Get("/users/{id}", s.handleFinbotProxy)
+				r.Post("/users/{id}/status", s.handleFinbotProxy)
+				r.Get("/users/{id}/finance/{part}", s.handleFinbotProxy)
+			})
+
 			r.Route("/projects", func(r chi.Router) {
 				r.Get("/", s.handleListProjects)
 				r.Post("/", s.handleCreateProject)

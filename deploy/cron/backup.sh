@@ -13,6 +13,11 @@
 # "s3:bucket/path", "sftp-host:backups" — and each dump is copied there after
 # it is written. See README.md for the one-time rclone setup.
 #
+# Other databases on the same server are dumped beside it, one file each:
+# BACKUP_EXTRA_DATABASES (default "finbot", the finance bot's database). A
+# name that does not exist yet is skipped; one that fails to dump is reported
+# in the row below without stopping the main backup.
+#
 # Install (nightly at 03:30):
 #   30 3 * * * /opt/portfolio/deploy/cron/backup.sh >> /var/log/backup.log 2>&1
 
@@ -48,6 +53,27 @@ size="$(du -h "$target" | cut -f1)"
 
 find "$BACKUP_DIR" -name 'portfolio-*.sql.gz' -mtime "+$KEEP_DAYS" -delete
 
+# The other databases. Each is its own file (finbot-YYYY-MM-DD-HHMM.sql.gz),
+# so restoring one never touches another.
+extra_files=()
+extra_report=""
+for name in ${BACKUP_EXTRA_DATABASES-finbot}; do
+  exists="$(compose exec -T db psql -U "$POSTGRES_USER" -d postgres -tAc \
+    "SELECT 1 FROM pg_database WHERE datname = '$name'" 2>/dev/null || true)"
+  [ "$exists" = "1" ] || continue
+  file="$BACKUP_DIR/$name-$stamp.sql.gz"
+  if compose exec -T db pg_dump -U "$POSTGRES_USER" "$name" | gzip > "$file.partial"; then
+    mv "$file.partial" "$file"
+    extra_files+=("$file")
+    extra_report="$extra_report $name $(du -h "$file" | cut -f1)"
+  else
+    rm -f "$file.partial"
+    extra_report="$extra_report $name FAILED"
+  fi
+  find "$BACKUP_DIR" -name "$name-*.sql.gz" -mtime "+$KEEP_DAYS" -delete
+done
+extra_report="${extra_report# }"
+
 notify() { # kind, severity, jsonb expression
   compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
     "INSERT INTO notifications (kind, severity, payload) VALUES ('$1', $2, $3);" >/dev/null
@@ -61,12 +87,14 @@ if [ -n "${BACKUP_REMOTE:-}" ]; then
   if ! command -v rclone >/dev/null 2>&1; then
     offsite="failed"
     offsite_error="rclone is not installed"
-  elif out="$(rclone copy "$target" "$BACKUP_REMOTE" 2>&1)"; then
+  elif out="$(for f in "$target" "${extra_files[@]}"; do rclone copy "$f" "$BACKUP_REMOTE" || exit 1; done 2>&1)"; then
     offsite="ok"
     # Pruning is best-effort: failing to delete an old copy is not a failed
     # backup.
-    rclone delete "$BACKUP_REMOTE" --include 'portfolio-*.sql.gz' \
-      --min-age "${REMOTE_KEEP_DAYS}d" >/dev/null 2>&1 || true
+    for prefix in portfolio ${BACKUP_EXTRA_DATABASES-finbot}; do
+      rclone delete "$BACKUP_REMOTE" --include "$prefix-*.sql.gz" \
+        --min-age "${REMOTE_KEEP_DAYS}d" >/dev/null 2>&1 || true
+    done
   else
     offsite="failed"
     offsite_error="$(printf '%s' "$out" | tail -n 1 | tr -d "'" | cut -c1-200)"
@@ -83,5 +111,5 @@ fi
 compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
   "INSERT INTO notifications (kind, payload) VALUES (
      'backup.finished',
-     jsonb_build_object('size', '$size', 'duration', '${duration}s', 'file', '$(basename "$target")', 'offsite', '$offsite')
+     jsonb_build_object('size', '$size', 'duration', '${duration}s', 'file', '$(basename "$target")', 'offsite', '$offsite', 'extra', '$extra_report')
    );" >/dev/null

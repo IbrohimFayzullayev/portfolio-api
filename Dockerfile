@@ -10,6 +10,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api ./cmd/api
 # The ops bot ships in the same image but runs as its own container, so a
 # crashed API cannot take the bot down with it.
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/bot ./cmd/bot
+# The finance bot: a separate product with its own database, same image.
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/finbot ./cmd/finbot
 
 # ---- run stage ----
 FROM alpine:3.20
@@ -19,5 +21,6 @@ WORKDIR /app
 # needs to be copied.
 COPY --from=build /out/api /app/api
 COPY --from=build /out/bot /app/bot
+COPY --from=build /out/finbot /app/finbot
 EXPOSE 8080
 ENTRYPOINT ["/app/api"]

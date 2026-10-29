@@ -26,3 +26,30 @@
 	encode gzip zstd
 	reverse_proxy umami:3000
 }
+
+# The finance bot's Mini App. One origin for both halves, so the page needs
+# no CORS and no build-time API URL: /api/* goes to the finance bot, the page
+# itself (/pul) and its assets to the dashboard. Nothing else of the
+# dashboard is reachable under this name - the admin login stays on
+# DASHBOARD_DOMAIN only.
+#
+# The default keeps this block's address a real name even before
+# FINBOT_DOMAIN is set in .env, so a missing variable can never turn it into
+# an empty (catch-all) site that clashes with another block.
+{$FINBOT_DOMAIN:hisob.fayzullayev.uz} {
+	encode gzip zstd
+
+	handle /api/* {
+		reverse_proxy finbot:8090
+	}
+	handle /healthz {
+		reverse_proxy finbot:8090
+	}
+	@app path /pul /pul/* /_next/*
+	handle @app {
+		reverse_proxy dashboard:3001
+	}
+	handle {
+		redir /pul
+	}
+}

@@ -49,4 +49,4 @@ test-integration: db-up ## Run unit + integration tests against a throwaway port
 	@docker compose exec -T db psql -U portfolio -d postgres -c "DROP DATABASE IF EXISTS portfolio_test;" >/dev/null
 	@docker compose exec -T db psql -U portfolio -d postgres -c "CREATE DATABASE portfolio_test;" >/dev/null
 	TEST_DATABASE_URL=postgres://portfolio:portfolio@localhost:5432/portfolio_test?sslmode=disable \
-		go test ./... -count=1 -v
+		go test ./... -count=1 -p 1 -v

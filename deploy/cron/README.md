@@ -41,6 +41,11 @@ The morning backup message then says whether the copy went out. If
 `BACKUP_REMOTE` is set and the copy fails, the bot says so immediately — the
 local dump succeeding would otherwise hide it forever.
 
+**Other databases.** `backup.sh` also dumps every name in
+`BACKUP_EXTRA_DATABASES` (default `finbot`, the finance bot's database) to
+its own file, `finbot-YYYY-MM-DD-HHMM.sql.gz`, beside the portfolio dump and
+to the same remote. A database that does not exist yet is skipped.
+
 **Restore test.** The bot queues a reminder on the first of each month. A
 backup nobody has restored is a file, not a backup:
 

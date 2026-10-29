@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -98,37 +97,6 @@ func parseErrorHelp(err error) string {
 		}, "\n")
 	}
 	return "❌ Tushunmadim: " + escapeHTML(err.Error())
-}
-
-// "; " and ", " separate entries on one line — but only when every piece has
-// an amount, so "kofe, pishiriq 45k" stays one entry. "1,5 mln" has no space
-// after the comma and is never split.
-var entrySeparator = regexp.MustCompile(`\s*;\s*|,\s+`)
-
-func splitEntries(text string, today time.Time) []string {
-	var out []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		pieces := entrySeparator.Split(line, -1)
-		if len(pieces) > 1 {
-			all := true
-			for _, piece := range pieces {
-				if _, err := parseEntry(piece, today); errors.Is(err, errNoAmount) {
-					all = false
-					break
-				}
-			}
-			if all {
-				out = append(out, pieces...)
-				continue
-			}
-		}
-		out = append(out, line)
-	}
-	return out
 }
 
 // recordBatch saves every line that parses and names the ones that did not,
@@ -1574,5 +1542,6 @@ func monthProjection(today time.Time, income, spent money) (int64, bool) {
 	daysInMonth := time.Date(today.Year(), today.Month()+1, 0, 0, 0, 0, 0, today.Location()).Day()
 	perDay := spent["UZS"] / int64(elapsed)
 	remaining := int64(daysInMonth - elapsed)
-	return income["UZS"] - spent["UZS"] - perDay*remaining, true
+	// Whole so'm: a projection with tiyin in it reads as false precision.
+	return (income["UZS"] - spent["UZS"] - perDay*remaining) / 100 * 100, true
 }

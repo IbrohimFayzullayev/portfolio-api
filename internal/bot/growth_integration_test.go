@@ -85,6 +85,13 @@ func TestIntegration_Growth(t *testing.T) {
 	b, calls := setupGrowthBot(t)
 	ctx := context.Background()
 	today := dayStart(time.Now())
+	// A sprint opened on Saturday or Sunday starts next Monday
+	// (growth.SprintWindow), so nothing logged today would count towards it
+	// and every assertion below would fail. The bot reads the wall clock, so
+	// this test can only run on a working day.
+	if wd := today.Weekday(); wd == time.Saturday || wd == time.Sunday {
+		t.Skipf("today is %s in Tashkent: a sprint opened today starts on Monday", wd)
+	}
 
 	// Backfill a few days before today: they are outside the sprint (which
 	// starts today) and must not leak into its numbers.

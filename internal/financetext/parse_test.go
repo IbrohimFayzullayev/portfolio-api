@@ -2,8 +2,11 @@ package financetext
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ibrohimcoder/portfolio-api/internal/finance"
 )
 
 func TestParseEntry(t *testing.T) {
@@ -39,6 +42,52 @@ func TestParseEntry(t *testing.T) {
 		{"05.10 dori 60k", kindExpense, 60_000_00, "UZS", "salomatlik", "", time.Date(2026, 10, 5, 0, 0, 0, 0, Tashkent)},
 		{"o'tgan kuni kino 90k", kindExpense, 90_000_00, "UZS", "dam", "", today.AddDate(0, 0, -2)},
 		{"choyxonaʼda osh 45k", kindExpense, 45_000_00, "UZS", "ovqat", "", today},
+
+		// Lines from the October 2026 log that used to land in "Boshqa" or
+		// read a plain word as a person.
+		{"Tabaka 65k", kindExpense, 65_000_00, "UZS", "ovqat", "", today},
+		{"Boshqa 55k", kindExpense, 55_000_00, "UZS", "boshqa", "", today},
+		{"Ishga taksi 20k", kindExpense, 20_000_00, "UZS", "transport", "", today},
+		{"Kecha ujen 50k", kindExpense, 50_000_00, "UZS", "ovqat", "", yesterday},
+		{"zavtrak 36k", kindExpense, 36_000_00, "UZS", "ovqat", "", today},
+		{"Sushi 130k", kindExpense, 130_000_00, "UZS", "ovqat", "", today},
+		{"Suv 5k", kindExpense, 5_000_00, "UZS", "ichimlik", "", today},
+		{"kola 12k", kindExpense, 12_000_00, "UZS", "ichimlik", "", today},
+		{"Fanta 10k", kindExpense, 10_000_00, "UZS", "ichimlik", "", today},
+		{"energetik 15k", kindExpense, 15_000_00, "UZS", "ichimlik", "", today},
+		{"Wedrink 36k", kindExpense, 36_000_00, "UZS", "ichimlik", "", today},
+		{"suv semechka 44k", kindExpense, 44_000_00, "UZS", "ichimlik", "", today},
+		{"Marojni 8k", kindExpense, 8_000_00, "UZS", "ichimlik", "", today},
+		{"kofe 25k", kindExpense, 25_000_00, "UZS", "ichimlik", "", today},
+		{"Sigaret 21.5k", kindExpense, 21_500_00, "UZS", "shaxsiy", "", today},
+		{"Soch oldirdim 80k", kindExpense, 80_000_00, "UZS", "shaxsiy", "", today},
+		{"shampun 66k", kindExpense, 66_000_00, "UZS", "shaxsiy", "", today},
+		{"Kreslo 1.535mln", kindExpense, 1_535_000_00, "UZS", "uy", "", today},
+		{"Loft stol 315k", kindExpense, 315_000_00, "UZS", "uy", "", today},
+		{"Kecha podstavka 58k", kindExpense, 58_000_00, "UZS", "uy", "", yesterday},
+		{"Telegram stars 120k", kindExpense, 120_000_00, "UZS", "aloqa", "", today},
+		{"Kecha 1.7 mln dacha", kindExpense, 1_700_000_00, "UZS", "dam", "", yesterday},
+		{"Ayamga sovga 1mln", kindGift, 1_000_000_00, "UZS", "marosim", "Ayam", today},
+		{"opamga sovga 300k", kindGift, 300_000_00, "UZS", "marosim", "Opam", today},
+		// Gas: the bill at home, unless a car is mentioned.
+		{"gaz zapravka 60k", kindExpense, 60_000_00, "UZS", "transport", "", today},
+		{"Zapravka 100k", kindExpense, 100_000_00, "UZS", "transport", "", today},
+		{"gaz quydim 50k", kindExpense, 50_000_00, "UZS", "transport", "", today},
+		{"Do'stimning mashinasiga gaz 100k", kindExpense, 100_000_00, "UZS", "transport", "", today},
+		{"benzin 200k", kindExpense, 200_000_00, "UZS", "transport", "", today},
+		{"gaz 80k", kindExpense, 80_000_00, "UZS", "uy", "", today},
+		{"kvartira gaz 90k", kindExpense, 90_000_00, "UZS", "uy", "", today},
+		{"Toshkent svet 60k", kindExpense, 60_000_00, "UZS", "uy", "", today},
+		// The family home in another town is its own category.
+		{"Jizzax gaz 250k", kindExpense, 250_000_00, "UZS", "oila", "", today},
+		{"Jizzaxdagi uyga svet 100k", kindExpense, 100_000_00, "UZS", "oila", "", today},
+		{"uydagi gazga 300k", kindExpense, 300_000_00, "UZS", "oila", "", today},
+		{"uydagi kartaga 150k", kindExpense, 150_000_00, "UZS", "oila", "", today},
+		// Naming the town is not naming a person, and a trip there is transport.
+		{"Jizzaxga taksi 150k", kindExpense, 150_000_00, "UZS", "transport", "", today},
+		{"Toshkentga avtobus 100k", kindExpense, 100_000_00, "UZS", "transport", "", today},
+		{"Metan gaz 50k", kindExpense, 50_000_00, "UZS", "transport", "", today},
+		{"Kecha gaz 80k", kindExpense, 80_000_00, "UZS", "uy", "", yesterday},
 
 		// Given away.
 		{"Sardorga 100k berdim to'yga", kindGift, 100_000_00, "UZS", "marosim", "Sardor", today},
@@ -225,5 +274,19 @@ func TestGuessCategoryFromNote(t *testing.T) {
 	}
 	if got := GuessCategoryFromNote(kindLent, "tushlik"); got != "qarz" {
 		t.Errorf("lent = %q, want qarz", got)
+	}
+}
+
+// Category names are shown in Telegram and on the page, sometimes to other
+// people: they stay general. Cigarettes are filed under "Shaxsiy" by a stem,
+// never by a category named after them.
+func TestCategoryLabelsStayGeneral(t *testing.T) {
+	for _, c := range finance.Categories {
+		if strings.Contains(strings.ToLower(c.Label+" "+c.Key), "sigaret") {
+			t.Errorf("category %q (%s) names cigarettes", c.Key, c.Label)
+		}
+	}
+	if CategoryOf("sigaret") != "shaxsiy" {
+		t.Errorf("sigaret = %q, want shaxsiy", CategoryOf("sigaret"))
 	}
 }

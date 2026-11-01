@@ -78,13 +78,54 @@ func guessCategory(kind string, norm []string, words []int) string {
 			}
 		}
 	default:
+		c, gas := "", false
 		for _, i := range words {
-			if c := CategoryOf(norm[i]); c != "" {
-				return c
+			if c = CategoryOf(norm[i]); c != "" {
+				gas = matchesStem(norm[i], "gaz")
+				break
 			}
+		}
+		// "gaz" is the bill at home or fuel for a car. Any transport word
+		// ("zapravka", "mashinaga", "metan", "quydim") says it is fuel.
+		if gas && hasCategoryWord(norm, words, "transport") {
+			c = "transport"
+		}
+		// A home bill that names the family home goes there, not to the flat.
+		if (c == "uy" || c == "") && isFamilyHome(norm, words) {
+			c = "oila"
+		}
+		if c != "" {
+			return c
 		}
 	}
 	return finance.DefaultCategory(kind)
+}
+
+func hasCategoryWord(norm []string, words []int, key string) bool {
+	for _, i := range words {
+		if CategoryOf(norm[i]) == key {
+			return true
+		}
+	}
+	return false
+}
+
+func isFamilyHome(norm []string, words []int) bool {
+	for _, i := range words {
+		if isFamilyHomeWord(norm[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isFamilyHomeWord(w string) bool {
+	for _, s := range finance.FamilyHomeStems {
+		if matchesStem(w, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func incomeCategoryOf(word string) string {
@@ -153,6 +194,26 @@ var stopWords = map[string]bool{
 	"sarfladim": true, "sotib": true, "bo'ldi": true,
 }
 
+// Ordinary words that end like a name with a case ending ("-ka", "-qa",
+// "-ga", "-dan") but are not names. Phones capitalise the first word of a
+// message, so "Tabaka 65k" looks exactly like "Aliga 50k"; without this list
+// it became a gift to "Taba", and "Boshqa 55k" a gift to "Bosh". Words that
+// are category stems need not be here: those are never names already.
+var notNames = map[string]bool{
+	"boshqa": true, "boshqasi": true, "boshqaga": true, "boshqadan": true,
+	"ishga": true, "ishda": true, "ishdan": true, "ishxonaga": true,
+	"ishxonada": true, "ishxonadan": true, "yo'lga": true, "yo'lda": true,
+	"shaharga": true, "shahardan": true, "markazga": true, "bolaga": true,
+	"bolalarga": true, "o'zimga": true, "o'zimdan": true, "hammaga": true,
+	"ruchka": true, "shapka": true, "banka": true, "butilka": true,
+	"chashka": true, "kruzhka": true, "tarelka": true, "vilka": true,
+	"gubka": true, "mochalka": true, "ochka": true,
+	"papka": true, "tetradka": true, "skovorodka": true, "kastryulka": true,
+	"elektrichka": true, "zachyotka": true, "pechenka": true, "olcha": true,
+	"tovuqqa": true, "toshkent": true, "toshkentga": true, "toshkentda": true,
+	"toshkentdagi": true, "toshkentdan": true, "kvartiraga": true,
+}
+
 // Words that follow a name rather than replace it: "Ali aka", "Dilnoza opa".
 var kinshipWords = map[string]bool{
 	"aka": true, "opa": true, "uka": true, "singil": true, "ota": true,
@@ -160,7 +221,8 @@ var kinshipWords = map[string]bool{
 	"bobo": true, "buvi": true, "domla": true, "ustoz": true,
 }
 
-var giftStems = []string{"sovg'a", "hadya", "yordam", "ehson", "sadaqa"}
+// "sovga" too: half the time the apostrophe is not typed at all.
+var giftStems = []string{"sovg'a", "sovga", "hadya", "yordam", "ehson", "sadaqa"}
 
 type Entry struct {
 	Kind        string
@@ -328,7 +390,8 @@ func markUsed(used []bool, from, n int) {
 
 // isPlainWord: could be a name — not a number, not a keyword, not a category.
 func isPlainWord(w string) bool {
-	if w == "" || stopWords[w] || strings.HasPrefix(w, "qarz") || CategoryOf(w) != "" {
+	if w == "" || stopWords[w] || notNames[w] || strings.HasPrefix(w, "qarz") ||
+		CategoryOf(w) != "" || isFamilyHomeWord(w) {
 		return false
 	}
 	for _, s := range giftStems {

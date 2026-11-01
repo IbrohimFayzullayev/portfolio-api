@@ -97,33 +97,59 @@ type Category struct {
 var Categories = []Category{
 	{"ovqat", "🍽", "Ovqat", []string{
 		"tushlik", "nonushta", "kechki", "ovqat", "kafe", "restoran", "choyxona",
-		"kofe", "coffee", "choy", "osh", "somsa", "lavash", "burger", "shashlik",
-		"fastfud", "fastfood", "pitsa", "pizza", "shirinlik", "muzqaymoq", "tort",
+		"choy", "osh", "somsa", "lavash", "burger", "shashlik",
+		"fastfud", "fastfood", "pitsa", "pizza", "shirinlik", "tort",
 		"hotdog", "donar", "shaurma", "manti", "chuchvara", "lag'mon", "kabob",
 		"evos", "kfc", "bellissimo", "dostavka",
+		// As people actually write it: Russian meal words, and dishes.
+		"zavtrak", "obed", "ujen", "ujin", "uzhin", "stolovaya", "tabaka",
+		"baliq", "sushi", "rollar", "steyk", "kotlet", "dimlama", "norin", "qozon",
+	}},
+	// Bought on the way, not a meal: water from a shop, a cola, an energy
+	// drink, a coffee to go, crisps. Kept apart from "Ovqat" so a month of
+	// small bottles shows as one number instead of hiding in lunches or
+	// "Boshqa".
+	{"ichimlik", "🥤", "Ichimlik va gazak", []string{
+		"suv", "kola", "cola", "coca", "pepsi", "fanta", "sprite", "mirinda",
+		"limonad", "gazli", "sok", "kompot", "energetik", "energy", "redbull",
+		"wedrink", "adrenalin", "gorilla", "kofe", "coffee", "kapuchino",
+		"latte", "amerikano", "chips", "semechka", "pista", "keshu", "yong'oq",
+		"shokolad", "shokalad", "snickers", "konfet", "pechenye", "saqich",
+		"jvachka", "muzqaymoq", "marojni", "morojni", "gazak",
 	}},
 	{"oziq", "🛒", "Oziq-ovqat", []string{
 		"bozor", "magazin", "market", "supermarket", "korzinka", "makro", "havas",
 		"oziq", "go'sht", "sabzavot", "meva", "sut", "tuxum", "yog'", "non",
-		"guruch", "shakar", "mahsulot", "produkt",
+		"guruch", "shakar", "mahsulot", "produkt", "kartoshka", "sosiska",
+		"kolbasa", "pishloq", "qatiq",
 	}},
 	{"transport", "🚕", "Transport", []string{
 		"taksi", "taxi", "yandex", "mytaxi", "metro", "avtobus", "benzin", "metan",
 		"propan", "zapravka", "parkovka", "moyka", "poyezd", "samolyot", "avia",
-		"yo'lkira", "mashina", "avto", "shina",
+		"yo'lkira", "mashina", "avto", "shina", "marshrutka", "dizel",
+		"solyarka", "yoqilg'i", "quydim", "quydirdim",
 	}},
 	{"texnika", "💻", "Texnika", []string{
 		"noutbuk", "kompyuter", "texnika", "naushnik", "quloqchin", "zaryadka",
-		"kabel", "planshet", "monitor", "klaviatura", "sichqoncha",
+		"kabel", "planshet", "monitor", "klaviatura", "sichqoncha", "fleshka",
+		"flashka", "rozetka",
 	}},
-	{"uy", "🏠", "Uy", []string{
+	{"uy", "🏠", "Uy va jihozlar", []string{
 		"ijara", "kvartira", "kommunal", "svet", "elektr", "gaz", "uy", "mebel",
-		"remont", "xo'jalik",
+		"remont", "xo'jalik", "kreslo", "stol", "stul", "divan", "shkaf",
+		"javon", "polka", "podstavka", "lampa", "chiroq", "gilam", "parda",
+		"idish", "choyshab", "yostiq", "ko'rpa", "matras",
 	}},
+	// The family home in another town: its gas and electricity are paid
+	// from here, and should not be added to the flat one actually lives in.
+	// No stems of its own: a message lands here when it names that home
+	// (FamilyHomeStems) and would otherwise have gone to "uy" or nowhere,
+	// so "Jizzax gaz 250k" is here but "Jizzaxga taksi 150k" is transport.
+	{"oila", "🏡", "Oila uyi", nil},
 	{"aloqa", "📱", "Aloqa va obuna", []string{
 		"telefon", "paynet", "internet", "uzmobile", "beeline", "ucell", "mobiuz",
 		"obuna", "spotify", "youtube", "netflix", "icloud", "chatgpt", "claude",
-		"apple", "google",
+		"apple", "google", "telegram", "stars", "premium",
 	}},
 	{"kiyim", "👕", "Kiyim", []string{
 		"kiyim", "ko'ylak", "shim", "poyabzal", "krossovka", "kurtka", "futbolka",
@@ -133,16 +159,23 @@ var Categories = []Category{
 		"dori", "apteka", "dorixona", "shifokor", "doktor", "vrach", "klinika",
 		"analiz", "stomatolog", "tish", "sport", "zal", "fitnes", "gym",
 	}},
+	// Things for oneself that are neither health nor clothes: a haircut,
+	// shampoo, perfume, cigarettes. The label stays general on purpose.
+	{"shaxsiy", "🧴", "Shaxsiy", []string{
+		"soch", "sartarosh", "barber", "shampun", "sovun", "atir", "parfyum",
+		"dezodorant", "krem", "britva", "kosmetika", "manikyur", "gigiena",
+		"salfetka", "sigaret", "sigareta", "iqos", "vape", "zajigalka",
+	}},
 	{"talim", "📚", "Ta'lim", []string{
 		"kitob", "kurs", "dars", "kontrakt", "repetitor", "udemy",
 	}},
 	{"dam", "🎬", "Dam olish", []string{
 		"kino", "o'yin", "playstation", "konsert", "sayohat", "sayr", "bilet",
-		"mehmonxona", "hotel",
+		"mehmonxona", "hotel", "dacha", "sauna", "bouling", "bilyard",
 	}},
 	{"marosim", "🎉", "Marosim va sovg'a", []string{
-		"to'y", "tug'ilgan", "sovg'a", "gul", "marosim", "ehson", "sadaqa",
-		"hadya", "nikoh", "xatna",
+		"to'y", "tug'ilgan", "tugilgan", "sovg'a", "sovga", "gul", "marosim",
+		"ehson", "sadaqa", "hadya", "nikoh", "xatna",
 	}},
 	{"ish", "💼", "Ish", []string{
 		"server", "hosting", "domen", "vps", "reklama", "figma", "github", "cursor",
@@ -150,6 +183,12 @@ var Categories = []Category{
 	// Never guessed from words: every debt entry gets it.
 	{"qarz", "🤝", "Qarz", nil},
 	{"boshqa", "📦", "Boshqa", nil},
+}
+
+// Words that point at the family home rather than the flat: the town, "at
+// home" ("uydagi"), the family. See the "oila" category.
+var FamilyHomeStems = []string{
+	"jizzax", "uydagi", "uydagilar", "oila", "oilam", "ota-ona", "qishloq",
 }
 
 // Where income comes from. A separate list, so a salary is never filed under
@@ -160,7 +199,7 @@ var IncomeCategories = []Category{
 	{"qoshimcha", "🧑‍💻", "Qo'shimcha ish", []string{
 		"freelance", "frilans", "loyiha", "zakaz", "buyurtma", "upwork", "dars",
 	}},
-	{"sovga_in", "🎁", "Sovg'a, yordam", []string{"sovg'a", "hadya", "yordam"}},
+	{"sovga_in", "🎁", "Sovg'a, yordam", []string{"sovg'a", "sovga", "hadya", "yordam"}},
 	{"kirim_boshqa", "💰", "Boshqa kirim", nil},
 }
 

@@ -197,7 +197,7 @@ func (t *tools) all() []mcp.Tool {
 	return []mcp.Tool{
 		{
 			Name: "content_audit", Title: "Kontent auditi",
-			Description: "Checks every post and project and lists what needs work: missing uz/en pair, old drafts, empty descriptions, thin bodies, demo leftovers, projects without repo/url or not in problem → decision → result form. Start here for any content question.",
+			Description: "Checks every post and project and lists what needs work: missing uz/en pair, old drafts, empty descriptions, thin bodies, demo leftovers, placeholder links, projects without repo/url or not in problem → decision → result form. pair_suggestions lists unlinked items that look like translations of each other (for link_translations). Start here for any content question.",
 			InputSchema: schema(emptySchema), Annotations: readOnly, Handler: t.contentAudit,
 		},
 		{
@@ -261,6 +261,16 @@ func (t *tools) all() []mcp.Tool {
  "date":{"type":"string"},"translation_key":{"type":"string"}},
  "required":["id"]}`),
 			Annotations: writeSafe, Handler: t.updateProject,
+		},
+		{
+			Name: "link_translations", Title: "Tarjimalarni bog'lash",
+			Description: "Links the uz and en versions of one post or project with a shared translation_key (used by the site for hreflang and the language switch). content_audit lists likely pairs under pair_suggestions. Changes only translation_key; refuses a key the other locale already uses.",
+			InputSchema: schema(`{"type":"object","properties":{
+ "type":{"type":"string","enum":["post","project"]},
+ "uz_id":{"type":"string"},"en_id":{"type":"string"},
+ "key":{"type":"string","description":"optional; default: an existing key of either side, else the English slug"}},
+ "required":["type","uz_id","en_id"]}`),
+			Annotations: writeSafe, Handler: t.linkTranslations,
 		},
 		{
 			Name: "list_messages", Title: "Aloqa xabarlari",
@@ -615,6 +625,9 @@ const thinBody = 150 // words
 
 var demoRe = regexp.MustCompile(`(?i)\b(demo|test|example|sample|lorem|hello[- ]world)\b`)
 
+// A link left over from a template: it renders as a working link to nowhere.
+var placeholderRe = regexp.MustCompile(`(?i)^(#|https?://(www\.)?(example\.(com|org|net)|localhost|127\.0\.0\.1)([:/].*)?)$`)
+
 // Section words that make a project read as a case study, in either language.
 var caseStudyWords = [][]string{
 	{"muammo", "problem", "challenge"},
@@ -693,6 +706,12 @@ func (t *tools) contentAudit(ctx context.Context, _ json.RawMessage) (any, error
 		if strings.TrimSpace(p.URL) == "" {
 			is = append(is, "no_live_url")
 		}
+		if placeholderRe.MatchString(strings.TrimSpace(p.URL)) {
+			is = append(is, "placeholder_url")
+		}
+		if placeholderRe.MatchString(strings.TrimSpace(p.Repo)) {
+			is = append(is, "placeholder_repo")
+		}
 		if !isCaseStudy(p.Body) {
 			is = append(is, "not_problem_decision_result")
 		}
@@ -707,7 +726,8 @@ func (t *tools) contentAudit(ctx context.Context, _ json.RawMessage) (any, error
 			"posts": len(ps), "posts_published": published, "posts_draft": drafts,
 			"projects": len(prs), "items_with_issues": len(findings),
 		},
-		"findings": findings,
+		"findings":         findings,
+		"pair_suggestions": SuggestPairs(append(postItems(ps), projectItems(prs)...)),
 	}, nil
 }
 

@@ -116,6 +116,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.puts = append(f.puts, m)
 		p := f.posts[strings.TrimPrefix(path, "/posts/")]
 		p.Title, p.Body, p.Description, p.Draft, p.Tags = in.Title, in.Body, in.Description, in.Draft, in.Tags
+		p.TranslationKey = in.TranslationKey
 		write(200, p)
 	case r.Method == "PATCH" && strings.HasSuffix(path, "/publish"):
 		var in struct{ Draft bool }
@@ -355,5 +356,91 @@ func TestPrompts(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], `"error"`) {
 		t.Errorf("a bad slug is refused: %s", lines[1])
+	}
+}
+
+func TestLinkTranslations(t *testing.T) {
+	f := newFake(t)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+
+	res := call(t, srv.URL,
+		// The en post already holds "vps-deploy", so the uz post cannot keep it.
+		`link_translations {"type":"post","uz_id":"`+idUz+`","en_id":"`+idDemo+`","key":"vps-deploy"}`,
+		`link_translations {"type":"post","uz_id":"`+idEn+`","en_id":"`+idDemo+`"}`,
+		`link_translations {"type":"post","uz_id":"`+idUz+`","en_id":"`+idDemo+`","key":"Bad Key"}`,
+		`link_translations {"type":"post","uz_id":"`+idUz+`","en_id":"`+idDemo+`"}`,
+	)
+	if e, _ := res[0]["error"].(string); !strings.Contains(e, "already used") || !strings.Contains(e, "vps-deploy") {
+		t.Errorf("a clash must be refused before the API sees it: %v", res[0])
+	}
+	if e, _ := res[1]["error"].(string); !strings.Contains(e, "not uz") {
+		t.Errorf("a wrong locale must be refused: %v", res[1])
+	}
+	if res[2]["error"] == nil {
+		t.Errorf("a bad key must be refused: %v", res[2])
+	}
+	// Default key: neither side's key is free, so the English slug.
+	if res[3]["key"] != "hello-world" || len(res[3]["changed"].([]any)) != 2 {
+		t.Fatalf("link: %v", res[3])
+	}
+	if f.posts[idUz].TranslationKey != "hello-world" || f.posts[idDemo].TranslationKey != "hello-world" {
+		t.Errorf("both rows must carry the key: %q %q", f.posts[idUz].TranslationKey, f.posts[idDemo].TranslationKey)
+	}
+	if len(f.puts) != 2 || f.puts[0]["draft"] != true || f.puts[0]["title"] != "VPS'ga deploy" {
+		t.Errorf("only the key may change: %v", f.puts)
+	}
+}
+
+// The shapes of the real data on 2026-11-04: three draft pairs with
+// different slugs written on the same day each, a project with one slug in
+// both languages, and a linked pair that must be left alone.
+func TestSuggestPairs(t *testing.T) {
+	it := func(typ, id, loc, slug, title, date, key string, tags ...string) item {
+		return item{typ, id, loc, slug, title, date, key, tags}
+	}
+	items := []item{
+		it("post", "u1", "uz", "nextjs-ssg-isr-amaliyot", "Amaliyotda SSG va ISR (App Router)", "2026-06-08", "", "nextjs", "tezkorlik", "rendering"),
+		it("post", "e1", "en", "nextjs-ssg-isr-in-practice", "SSG and ISR in practice with the App Router", "2026-06-08", "", "nextjs", "performance", "rendering"),
+		it("post", "u2", "uz", "dizayn-tizimini-qurish", "Kengayadigan dizayn tizimini qurish", "2026-05-28", "", "dizayn-tizimlari", "css", "react"),
+		it("post", "e2", "en", "building-a-design-system", "Building a design system that scales", "2026-05-28", "", "design-systems", "css", "react"),
+		it("post", "u3", "uz", "typescript-bilan-tez-yetkazish", "TypeScript'ni buzmasdan tez yetkazib berish", "2026-04-19", "", "typescript", "dx"),
+		it("post", "e3", "en", "shipping-fast-with-typescript", "Shipping fast without breaking TypeScript", "2026-04-19", "", "typescript", "dx"),
+		it("post", "u4", "uz", "uch-servis-bitta-vps", "Uch servis", "2026-10-08", "vps-deploy", "deploy"),
+		it("post", "e4", "en", "three-services-one-vps", "Three services", "2026-10-08", "vps-deploy", "deploy"),
+		// Same day, nothing else in common: not a pair.
+		it("post", "u5", "uz", "vercelsiz-deploy", "Vercelsiz deploy", "2026-11-04", ""),
+		it("post", "e5", "en", "getting-started", "Getting started", "2026-11-04", ""),
+		it("project", "pu", "uz", "zukko-ai", "Zukko AI", "2026-01-22", "", "ai"),
+		it("project", "pe", "en", "zukko-ai", "Zukko AI", "2026-01-22", "", "ai"),
+	}
+	got := map[string]string{}
+	for _, s := range SuggestPairs(items) {
+		got[s.UzID] = s.EnID + " " + s.Key
+	}
+	want := map[string]string{
+		"u1": "e1 nextjs-ssg-isr-in-practice",
+		"u2": "e2 building-a-design-system",
+		"u3": "e3 shipping-fast-with-typescript",
+		"pu": "pe zukko-ai",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("suggestions: %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: got %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestPlaceholderLinks(t *testing.T) {
+	for link, want := range map[string]bool{
+		"https://example.com": true, "http://localhost:3000/x": true, "#": true,
+		"https://ncrm.radius.uz": false, "https://example.community": false, "": false,
+	} {
+		if got := placeholderRe.MatchString(link); got != want {
+			t.Errorf("%q: got %v", link, got)
+		}
 	}
 }

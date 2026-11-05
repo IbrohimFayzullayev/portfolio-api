@@ -552,8 +552,46 @@ func (b *Bot) renderNotification(n notification) string {
 	case "error.rate":
 		return fmt.Sprintf("⚠️ <b>Xatolar to'lqini</b>\n\n%d daqiqada %d ta 5xx javob.\n\n/xatolar",
 			num(n.payload, "minutes"), num(n.payload, "count"))
+
+	case "agent.change":
+		// A write an AI agent made through the API (internal/api/
+		// agent_changes_handler.go). Field names only: the values can be
+		// whole post bodies, and the log keeps them for when they matter.
+		actor := strings.ToUpper(str(n.payload, "actor"))
+		if actor == "" {
+			actor = "MCP"
+		}
+		tool := str(n.payload, "tool")
+		var sb strings.Builder
+		if ok, _ := n.payload["ok"].(bool); ok {
+			sb.WriteString("🤖 <b>" + escapeHTML(actor) + ": " + escapeHTML(tool) + "</b>")
+		} else {
+			sb.WriteString("⚠️ <b>" + escapeHTML(actor) + " xato: " + escapeHTML(tool) + "</b>")
+		}
+		if targets := strs(n.payload, "targets"); len(targets) > 0 {
+			sb.WriteString("\n\n" + escapeHTML(strings.Join(targets, ", ")))
+		}
+		if fields := strs(n.payload, "fields"); len(fields) > 0 {
+			sb.WriteString("\nO'zgardi: " + escapeHTML(strings.Join(fields, ", ")))
+		}
+		if e := str(n.payload, "error"); e != "" {
+			sb.WriteString("\n\n" + escapeHTML(truncate(e, 400)))
+		}
+		return sb.String()
 	}
 	return ""
+}
+
+// strs reads a list of strings from a payload; anything else in it is skipped.
+func strs(payload map[string]any, key string) []string {
+	list, _ := payload[key].([]any)
+	out := make([]string, 0, len(list))
+	for _, v := range list {
+		if s, ok := v.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // publicURL builds links here rather than storing them in the payload, so a

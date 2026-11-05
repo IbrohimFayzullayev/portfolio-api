@@ -201,6 +201,13 @@ func (s *Server) routes() *chi.Mux {
 			// One read-only snapshot of how the stack is doing.
 			r.Get("/system", s.handleSystemOverview)
 
+			// What AI agents changed, reported by the agents themselves
+			// (agent_changes_handler.go, migration 000017).
+			r.Route("/agent-changes", func(r chi.Router) {
+				r.Get("/", s.handleListAgentChanges)
+				r.Post("/", s.handleCreateAgentChange)
+			})
+
 			// The finance bot's users and their reports, forwarded to the
 			// finance bot itself (finbot_proxy.go). Admin session only.
 			r.Route("/finbot", func(r chi.Router) {

@@ -187,3 +187,27 @@ func TestBackupMessageSaysWhereTheCopyIs(t *testing.T) {
 		t.Errorf("legacy row changed shape: %q", got)
 	}
 }
+
+// What an AI agent changed: who, which tool, on what, which fields - escaped,
+// because a title can hold anything - and a failure reads as one.
+func TestRenderAgentChange(t *testing.T) {
+	b := &Bot{}
+	ok := b.renderNotification(notification{kind: "agent.change", payload: map[string]any{
+		"actor": "mcp", "tool": "link_translations", "ok": true,
+		"targets": []any{"uz/dizayn-tizimini-qurish", "en/building-a-design-system"},
+		"fields":  []any{"translation_key"},
+	}})
+	for _, want := range []string{"🤖 <b>MCP: link_translations</b>", "uz/dizayn-tizimini-qurish, en/building-a-design-system", "O'zgardi: translation_key"} {
+		if !strings.Contains(ok, want) {
+			t.Errorf("missing %q:\n%s", want, ok)
+		}
+	}
+	failed := b.renderNotification(notification{kind: "agent.change", payload: map[string]any{
+		"tool": "update_post", "ok": false, "targets": []any{"uz/<b>x</b>"}, "error": "API 409: slug <taken>",
+	}})
+	for _, want := range []string{"⚠️ <b>MCP xato: update_post</b>", "uz/&lt;b&gt;x&lt;/b&gt;", "slug &lt;taken&gt;"} {
+		if !strings.Contains(failed, want) {
+			t.Errorf("missing %q:\n%s", want, failed)
+		}
+	}
+}

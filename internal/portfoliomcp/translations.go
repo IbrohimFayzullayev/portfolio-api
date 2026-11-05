@@ -278,7 +278,10 @@ func (t *tools) linkTranslations(ctx context.Context, args json.RawMessage) (any
 		return nil, fmt.Errorf("key %q is already used by the %s %s %q (%s); choose another key", key, c.Locale, c.Type, c.Slug, c.ID)
 	}
 
-	var changed []string
+	var (
+		changed  []string
+		writeErr error
+	)
 	for _, it := range []item{uz, en} {
 		if it.Key == key {
 			continue
@@ -290,9 +293,7 @@ func (t *tools) linkTranslations(ctx context.Context, args json.RawMessage) (any
 			if next.Tags == nil {
 				next.Tags = []string{}
 			}
-			if err := t.c.Do(ctx, http.MethodPut, "/api/v1/posts/"+url.PathEscape(p.ID), nil, next, nil); err != nil {
-				return nil, fmt.Errorf("%s %s: %w", it.Locale, it.Slug, err)
-			}
+			writeErr = t.c.Do(ctx, http.MethodPut, "/api/v1/posts/"+url.PathEscape(p.ID), nil, next, nil)
 		} else {
 			p := projects[it.ID]
 			next := p.input()
@@ -303,19 +304,36 @@ func (t *tools) linkTranslations(ctx context.Context, args json.RawMessage) (any
 			if next.Stack == nil {
 				next.Stack = []string{}
 			}
-			if err := t.c.Do(ctx, http.MethodPut, "/api/v1/projects/"+url.PathEscape(p.ID), nil, next, nil); err != nil {
-				return nil, fmt.Errorf("%s %s: %w", it.Locale, it.Slug, err)
-			}
+			writeErr = t.c.Do(ctx, http.MethodPut, "/api/v1/projects/"+url.PathEscape(p.ID), nil, next, nil)
+		}
+		if writeErr != nil {
+			writeErr = fmt.Errorf("%s %s: %w", it.Locale, it.Slug, writeErr)
+			break
 		}
 		changed = append(changed, it.Locale+":"+it.Slug)
 	}
-	return map[string]any{
+	if len(changed) == 0 && writeErr == nil {
+		// Already linked with this key: nothing written, nothing to log.
+		return map[string]any{"type": in.Type, "key": key, "changed": []string{}, "unchanged": true}, nil
+	}
+	ch := change{
+		Tool: "link_translations", TargetType: in.Type,
+		Targets: []target{{uz.ID, label(uz.Locale, uz.Slug)}, {en.ID, label(en.Locale, en.Slug)}},
+		Changes: map[string]any{"translation_key": map[string]any{
+			"from": map[string]string{"uz": uz.Key, "en": en.Key}, "to": key,
+		}},
+	}
+	if writeErr != nil && len(changed) > 0 {
+		// Half done: say which side already carries the new key.
+		ch.Changes["written_before_error"] = changed
+	}
+	return t.audited(ctx, ch, map[string]any{
 		"type": in.Type, "key": key, "changed": nonNilStrings(changed),
 		"linked": []map[string]string{
 			{"locale": "uz", "id": uz.ID, "slug": uz.Slug},
 			{"locale": "en", "id": en.ID, "slug": en.Slug},
 		},
-	}, nil
+	}, writeErr)
 }
 
 func nonNilStrings(s []string) []string {

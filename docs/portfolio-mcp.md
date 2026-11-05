@@ -30,6 +30,7 @@ Siz (chat) ──▶ Claude Code / Desktop ──▶ Claude modeli
 | `list_messages`, `mark_message_read`             | Aloqa formasidan kelgan xabarlar                                                                                                                                | o'qish / yozish |
 | `list_invitations`                               | Taklifnoma saytidan kelgan javoblar                                                                                                                             | o'qish          |
 | `system_overview`                                | Uptime, xatolar, deploy, outbox, bot, backup                                                                                                                    | o'qish          |
+| `list_changes` | Agent nimani o'zgartirgani: tool, element, har bir maydonning oldingi va keyingi qiymati, xato urinishlar. Qaytarish uchun ham shu | o'qish |
 | `finance_summary`                                | Shaxsiy moliya (sizniki, finbot foydalanuvchilariniki emas)                                                                                                     | o'qish          |
 | `growth_summary`                                 | Ingliz tili mashqlari, sprintlar, IELTS mock natijalari                                                                                                         | o'qish          |
 
@@ -43,6 +44,15 @@ Tayyor so'rovlar (prompts). Claude Code'da `/mcp__portfolio__...` ko'rinishida c
 - `haftalik_xulosa`: oxirgi 7 kun bo'yicha xulosa va 3 ta keyingi qadam.
 - `loyihani_qayta_yoz slug`: loyihani case study shakliga keltirish, uz va en versiyalarida.
 - `post_qoralama mavzu`: ikki tilli post qoralamasi.
+
+## Agent jurnali
+
+MCP orqali qilingan har bir yozish amali `agent_changes` jadvaliga yoziladi (migratsiya 000017). Jurnalga quyidagilar tushadi: qaysi tool ishlatilgani, qaysi element o'zgargani, maydonlarning oldingi va keyingi to'liq qiymatlari, API amalni qabul qilgan yoki qilmagani. Xato bilan tugagan urinishlar ham yoziladi. Yozuvni MCP serverning o'z kodi qo'shadi, model emas. Shuning uchun birorta o'zgarish jurnaldan chetda qolmaydi.
+
+- **Ops bot xabari.** Har bir o'zgarishda xabar keladi, masalan `🤖 MCP: update_post`, element va o'zgargan maydonlar bilan. Xatolar ⚠️ belgisi bilan keladi. Xabarni o'qilgan qilish faqat jurnalga yoziladi, xabar yuborilmaydi.
+- **Ko'rish va qaytarish.** Claude'ga "nima o'zgartirding?" yoki "oxirgi o'zgarishni qaytar" deb yozing. U `list_changes` dagi oldingi qiymatlarni olib, ularni qayta yozadi.
+- **API.** `GET/POST /api/v1/agent-changes` (faqat admin). `actor` maydoni keyinroq Telegram'dagi `/ai` buyrug'i uchun ham ishlatiladi.
+- **Jurnal yozilmay qolsa**, o'zgarish baribir amalga oshgan bo'ladi. Tool javobida `audit_error` chiqadi va Claude buni sizga aytadi.
 
 ## Token tejash qanday ishlaydi
 

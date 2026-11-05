@@ -295,6 +295,12 @@ func (t *tools) all() []mcp.Tool {
 			InputSchema: schema(emptySchema), Annotations: readOnly, Handler: t.systemOverview,
 		},
 		{
+			Name: "list_changes", Title: "Agent o'zgarishlari",
+			Description: "What AI agents changed through this server, newest first: tool, target, each field's value before and after (long values shortened), and failed attempts. Use it to answer 'what did you change?' and to undo: write the 'from' values back with update_post / update_project.",
+			InputSchema: schema(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100}}}`),
+			Annotations: readOnly, Handler: t.listChanges,
+		},
+		{
 			Name: "finance_summary", Title: "Shaxsiy moliya",
 			Description: "Ibrohim's own money log for a period (default: this month so far): spent, income, net, by category, by month, largest entries, debts, comparison with the previous period. Amounts are in minor units (so'm × 100).",
 			InputSchema: schema(rangeSchema), Annotations: readOnly, Handler: t.financeSummary,
@@ -412,10 +418,14 @@ func (t *tools) createPostDraft(ctx context.Context, args json.RawMessage) (any,
 		in.Tags = []string{}
 	}
 	var p post
-	if err := t.c.Do(ctx, http.MethodPost, "/api/v1/posts", nil, in, &p); err != nil {
-		return nil, err
-	}
-	return withDashes(map[string]any{"created": summarizePost(p)}, fixed), nil
+	err := t.c.Do(ctx, http.MethodPost, "/api/v1/posts", nil, in, &p)
+	return t.audited(ctx, change{
+		Tool: "create_post_draft", TargetType: "post",
+		Targets: []target{{p.ID, label(in.Locale, in.Slug)}},
+		Changes: map[string]any{"created": map[string]any{
+			"locale": in.Locale, "slug": in.Slug, "title": in.Title, "draft": true,
+		}},
+	}, withDashes(map[string]any{"created": summarizePost(p)}, fixed), err)
 }
 
 func (t *tools) updatePost(ctx context.Context, args json.RawMessage) (any, error) {
@@ -466,10 +476,12 @@ func (t *tools) updatePost(ctx context.Context, args json.RawMessage) (any, erro
 		next.Tags = []string{}
 	}
 	var out post
-	if err := t.c.Do(ctx, http.MethodPut, "/api/v1/posts/"+p.ID, nil, next, &out); err != nil {
-		return nil, err
-	}
-	return withDashes(map[string]any{"changed": changed, "post": summarizePost(out)}, fixed), nil
+	err = t.c.Do(ctx, http.MethodPut, "/api/v1/posts/"+p.ID, nil, next, &out)
+	return t.audited(ctx, change{
+		Tool: "update_post", TargetType: "post",
+		Targets: []target{{p.ID, label(p.Locale, p.Slug)}},
+		Changes: fieldDiff(p.input(), next, changed),
+	}, withDashes(map[string]any{"changed": changed, "post": summarizePost(out)}, fixed), err)
 }
 
 func (t *tools) setPostPublished(ctx context.Context, args json.RawMessage) (any, error) {
@@ -483,16 +495,21 @@ func (t *tools) setPostPublished(ctx context.Context, args json.RawMessage) (any
 	if in.Published == nil {
 		return nil, fmt.Errorf("published is required: true to publish, false to take back to draft")
 	}
-	id, err := checkID(in.ID)
+	p, err := t.post(ctx, in.ID)
 	if err != nil {
 		return nil, err
 	}
+	if p.Draft == !*in.Published {
+		return map[string]any{"unchanged": true, "post": summarizePost(p)}, nil
+	}
 	var out post
 	body := map[string]bool{"draft": !*in.Published}
-	if err := t.c.Do(ctx, http.MethodPatch, "/api/v1/posts/"+id+"/publish", nil, body, &out); err != nil {
-		return nil, err
-	}
-	return map[string]any{"post": summarizePost(out)}, nil
+	err = t.c.Do(ctx, http.MethodPatch, "/api/v1/posts/"+p.ID+"/publish", nil, body, &out)
+	return t.audited(ctx, change{
+		Tool: "set_post_published", TargetType: "post",
+		Targets: []target{{p.ID, label(p.Locale, p.Slug)}},
+		Changes: map[string]any{"draft": map[string]any{"from": p.Draft, "to": !*in.Published}},
+	}, map[string]any{"post": summarizePost(out)}, err)
 }
 
 /* -------------------------------- projects -------------------------------- */
@@ -603,10 +620,12 @@ func (t *tools) updateProject(ctx context.Context, args json.RawMessage) (any, e
 		next.Stack = []string{}
 	}
 	var out project
-	if err := t.c.Do(ctx, http.MethodPut, "/api/v1/projects/"+p.ID, nil, next, &out); err != nil {
-		return nil, err
-	}
-	return withDashes(map[string]any{"changed": changed, "project": summarizeProject(out)}, fixed), nil
+	err = t.c.Do(ctx, http.MethodPut, "/api/v1/projects/"+p.ID, nil, next, &out)
+	return t.audited(ctx, change{
+		Tool: "update_project", TargetType: "project",
+		Targets: []target{{p.ID, label(p.Locale, p.Slug)}},
+		Changes: fieldDiff(p.input(), next, changed),
+	}, withDashes(map[string]any{"changed": changed, "project": summarizeProject(out)}, fixed), err)
 }
 
 /* ---------------------------------- audit --------------------------------- */
@@ -815,10 +834,12 @@ func (t *tools) markMessageRead(ctx context.Context, args json.RawMessage) (any,
 	if err != nil {
 		return nil, err
 	}
-	if err := t.c.Do(ctx, http.MethodPatch, "/api/v1/messages/"+id+"/read", nil, nil, nil); err != nil {
-		return nil, err
-	}
-	return map[string]any{"read": id}, nil
+	err = t.c.Do(ctx, http.MethodPatch, "/api/v1/messages/"+id+"/read", nil, nil, nil)
+	return t.audited(ctx, change{
+		Tool: "mark_message_read", TargetType: "message",
+		Targets: []target{{ID: id}},
+		Changes: map[string]any{"read": map[string]any{"from": false, "to": true}},
+	}, map[string]any{"read": id}, err)
 }
 
 func (t *tools) listInvitations(ctx context.Context, args json.RawMessage) (any, error) {

@@ -22,6 +22,7 @@ Qoidalar:
 - Loyiha matni "muammo → qaror → natija" shaklida yoziladi (en: problem → decision → result): qanday muammo bor edi, nima qaror qilindi va nega, natija raqam yoki aniq fakt bilan.
 - Avval ro'yxat va audit tool'lari, to'liq matn (get_post, get_project) faqat kerak bo'lganda - har bir o'qilgan bayt token.
 - Sayt matnlarida uzun tire va o'rta tire ishlatilmaydi, faqat oddiy "-". Yozish tool'lari ularni o'zi almashtiradi va dashes_replaced deb xabar beradi.
+- Har bir yozish amali avtomatik ravishda agent jurnaliga yoziladi va ops bot Ibrohimga xabar beradi. "Nima o'zgartirding?" yoki "qaytar" deyilsa, list_changes dan foydalan: qaytarish uchun from qiymatlarini update_post / update_project bilan qayta yoz.
 - O'chirish tool'i ataylab yo'q. O'chirish kerak bo'lsa, admin panelda qilinadi.
 - Moliya va o'sish ma'lumotlari Ibrohimning shaxsiy ma'lumoti: so'ralmasa xulosa ber, alohida yozuvlarni ro'yxat qilma.
 - Ustuvorlik: dekabrgacha IELTS sprinti koddan oldin turadi. Haftalik xulosada o'sish bo'limini birinchi qo'y.`

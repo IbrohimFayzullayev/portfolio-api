@@ -33,6 +33,8 @@ type fakeAPI struct {
 	calls   []string
 	puts    []map[string]any
 	read    []string
+	audit   []map[string]any // rows POSTed to /agent-changes
+	noAudit bool             // make the log refuse writes
 }
 
 func newFake(t *testing.T) *fakeAPI {
@@ -110,6 +112,10 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(400, map[string]string{"error": err.Error()})
 			return
 		}
+		if in.Slug == "taken" {
+			write(409, map[string]string{"error": "a post with this locale and slug already exists"})
+			return
+		}
 		raw, _ := json.Marshal(in)
 		var m map[string]any
 		json.Unmarshal(raw, &m)
@@ -149,6 +155,21 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				{"month": "2026-10", "amounts": map[string]any{}, "income": map[string]any{}},
 				{"month": "2026-11", "amounts": map[string]any{"UZS": 100}, "income": map[string]any{}},
 			}})
+	case r.Method == "POST" && path == "/agent-changes":
+		if f.noAudit {
+			write(500, map[string]string{"error": "could not record the change"})
+			return
+		}
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		f.audit = append(f.audit, m)
+		write(201, map[string]any{"id": len(f.audit)})
+	case r.Method == "GET" && path == "/agent-changes":
+		items := []map[string]any{}
+		for i := len(f.audit) - 1; i >= 0; i-- {
+			items = append(items, f.audit[i])
+		}
+		write(200, map[string]any{"items": items})
 	default:
 		write(404, map[string]string{"error": "not found: " + r.Method + " " + path})
 	}
@@ -442,5 +463,96 @@ func TestPlaceholderLinks(t *testing.T) {
 		if got := placeholderRe.MatchString(link); got != want {
 			t.Errorf("%q: got %v", link, got)
 		}
+	}
+}
+
+// Every write leaves a row in the agent log with the values before and
+// after; failed writes too; a no-op leaves none.
+func TestWritesAreAudited(t *testing.T) {
+	f := newFake(t)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+
+	res := call(t, srv.URL,
+		`update_post {"id":"`+idUz+`","title":"Yangi sarlavha"}`,
+		`set_post_published {"id":"`+idUz+`","published":true}`,
+		`set_post_published {"id":"`+idUz+`","published":true}`,
+		`update_post {"id":"`+idUz+`","slug":"taken"}`,
+		`mark_message_read {"id":"`+idMsg+`"}`,
+		`link_translations {"type":"post","uz_id":"`+idUz+`","en_id":"`+idDemo+`"}`,
+	)
+	if res[2]["unchanged"] != true {
+		t.Errorf("publishing a published post is a no-op: %v", res[2])
+	}
+	if res[3]["error"] == nil {
+		t.Errorf("the 409 must reach the model: %v", res[3])
+	}
+	tools := []string{}
+	for _, a := range f.audit {
+		tools = append(tools, a["tool"].(string))
+		if a["actor"] != "mcp" {
+			t.Errorf("actor: %v", a["actor"])
+		}
+	}
+	want := "update_post set_post_published update_post mark_message_read link_translations"
+	if strings.Join(tools, " ") != want {
+		t.Fatalf("logged %v, want %s", tools, want)
+	}
+
+	title := f.audit[0]["changes"].(map[string]any)["title"].(map[string]any)
+	if title["from"] != "VPS'ga deploy" || title["to"] != "Yangi sarlavha" || f.audit[0]["ok"] != true {
+		t.Errorf("update diff: %v", f.audit[0])
+	}
+	if tg := f.audit[0]["targets"].([]any)[0].(map[string]any); tg["label"] != "uz/vps-deploy" || tg["id"] != idUz {
+		t.Errorf("target: %v", tg)
+	}
+	draft := f.audit[1]["changes"].(map[string]any)["draft"].(map[string]any)
+	if draft["from"] != true || draft["to"] != false {
+		t.Errorf("publish diff: %v", draft)
+	}
+	if f.audit[2]["ok"] != false || !strings.Contains(f.audit[2]["error"].(string), "already exists") {
+		t.Errorf("a failed write is logged as one: %v", f.audit[2])
+	}
+	if f.audit[3]["target_type"] != "message" {
+		t.Errorf("read mark: %v", f.audit[3])
+	}
+	key := f.audit[4]["changes"].(map[string]any)["translation_key"].(map[string]any)
+	if key["to"] != "hello-world" || key["from"].(map[string]any)["uz"] != "vps-deploy" || len(f.audit[4]["targets"].([]any)) != 2 {
+		t.Errorf("link diff: %v", f.audit[4])
+	}
+}
+
+func TestAuditFailureDoesNotHideTheWrite(t *testing.T) {
+	f := newFake(t)
+	f.noAudit = true
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+
+	res := call(t, srv.URL, `update_post {"id":"`+idUz+`","title":"Yangi"}`)
+	if f.posts[idUz].Title != "Yangi" {
+		t.Fatal("the write itself must go through")
+	}
+	if e, _ := res[0]["audit_error"].(string); !strings.Contains(e, "not logged") {
+		t.Errorf("the model must be told the log missed it: %v", res[0])
+	}
+}
+
+func TestListChangesShortensLongValues(t *testing.T) {
+	f := newFake(t)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+
+	long := strings.Repeat("a", 2000)
+	res := call(t, srv.URL,
+		`update_post {"id":"`+idUz+`","body":"`+long+`"}`,
+		`list_changes {"limit":5}`,
+	)
+	items := res[1]["items"].([]any)
+	body := items[0].(map[string]any)["changes"].(map[string]any)["body"].(map[string]any)
+	if to := body["to"].(string); !strings.HasSuffix(to, "(2000 chars)") || len(to) > 200 {
+		t.Errorf("long value not shortened: %.80q", to)
+	}
+	if f.audit[0]["changes"].(map[string]any)["body"].(map[string]any)["to"] != long {
+		t.Error("the log itself keeps the whole value")
 	}
 }

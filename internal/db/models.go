@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AgentChange struct {
+	ID         int64     `json:"id"`
+	Actor      string    `json:"actor"`
+	Tool       string    `json:"tool"`
+	TargetType string    `json:"target_type"`
+	Targets    []byte    `json:"targets"`
+	Changes    []byte    `json:"changes"`
+	Ok         bool      `json:"ok"`
+	Error      string    `json:"error"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type Book struct {
 	ID         uuid.UUID  `json:"id"`
 	Title      string     `json:"title"`

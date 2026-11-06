@@ -76,6 +76,7 @@ type post struct {
 	Date           string     `json:"date"`
 	TranslationKey string     `json:"translation_key"`
 	PublishedAt    *time.Time `json:"published_at"`
+	PublishAt      *time.Time `json:"publish_at"` // scheduled, still a draft
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
@@ -159,6 +160,7 @@ type itemSummary struct {
 	TranslationKey string     `json:"translation_key,omitempty"`
 	Words          int        `json:"words"`
 	PublishedAt    *time.Time `json:"published_at,omitempty"`
+	ScheduledFor   string     `json:"scheduled_for,omitempty"` // Tashkent time
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
@@ -166,7 +168,7 @@ func summarizePost(p post) itemSummary {
 	return itemSummary{ID: p.ID, Locale: p.Locale, Slug: p.Slug, Title: p.Title,
 		Description: p.Description, Draft: p.Draft, Featured: p.Featured, Date: p.Date,
 		Tags: p.Tags, TranslationKey: p.TranslationKey, Words: len(strings.Fields(p.Body)),
-		PublishedAt: p.PublishedAt, UpdatedAt: p.UpdatedAt}
+		PublishedAt: p.PublishedAt, ScheduledFor: localTime(p.PublishAt), UpdatedAt: p.UpdatedAt}
 }
 
 func summarizeProject(p project) itemSummary {
@@ -242,6 +244,16 @@ func (t *tools) all() []mcp.Tool {
 			Annotations: writePublic, Handler: t.setPostPublished,
 		},
 		{
+			Name: "schedule_post", Title: "Nashrni rejalashtirish",
+			Description: "Schedules a draft to go live at a Tashkent time (the ops bot's scheduler publishes it within a minute of that time and announces it), or cancels a schedule with cancel:true. Only when the user asked for it in this conversation. list_posts shows scheduled_for.",
+			InputSchema: schema(`{"type":"object","properties":{
+ "id":{"type":"string"},
+ "at":{"type":"string","description":"YYYY-MM-DD HH:MM in Tashkent time, at least a minute ahead"},
+ "cancel":{"type":"boolean"}},
+ "required":["id"]}`),
+			Annotations: writePublic, Handler: t.schedulePost,
+		},
+		{
 			Name: "list_projects", Title: "Loyihalar ro'yxati",
 			Description: "Portfolio projects without bodies.",
 			InputSchema: schema(`{"type":"object","properties":{` + localeFilter + `}}`),
@@ -299,6 +311,24 @@ func (t *tools) all() []mcp.Tool {
 			Description: "What AI agents changed through this server, newest first: tool, target, each field's value before and after (long values shortened), and failed attempts. Use it to answer 'what did you change?' and to undo: write the 'from' values back with update_post / update_project.",
 			InputSchema: schema(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100}}}`),
 			Annotations: readOnly, Handler: t.listChanges,
+		},
+		{
+			Name: "log_practice", Title: "Ingliz tili mashqini yozish",
+			Description: "Logs one English practice session, the same row the ops bot's /qildim writes. Either text in the /qildim syntax (\"45 w essay\", \"kecha 30 s part 1\"; w s l r v g m = writing speaking listening reading vocab grammar mock) or kind + minutes (+ note, day: today | yesterday | YYYY-MM-DD, up to a month back).",
+			InputSchema: schema(`{"type":"object","properties":{
+ "text":{"type":"string"},
+ "kind":{"type":"string","enum":["writing","speaking","listening","reading","vocab","grammar","mock","other"]},
+ "minutes":{"type":"integer","minimum":1,"maximum":600},
+ "note":{"type":"string"},"day":{"type":"string"}}}`),
+			Annotations: &mcp.Annotations{}, Handler: t.logPractice,
+		},
+		{
+			Name: "add_finance_entry", Title: "Moliya yozuvi",
+			Description: "Adds one entry to Ibrohim's own money log, read by the ops bot's parser from a line like \"taksi 25k\", \"kecha obed 45k\", \"Aliga 500k qarz berdim\", \"+10mln oylik\". Pass the user's words as they wrote them, one entry per call. dry_run:true returns the reading without saving - use it when the line is unusual.",
+			InputSchema: schema(`{"type":"object","properties":{
+ "text":{"type":"string"},"dry_run":{"type":"boolean"}},
+ "required":["text"]}`),
+			Annotations: &mcp.Annotations{}, Handler: t.addFinanceEntry,
 		},
 		{
 			Name: "finance_summary", Title: "Shaxsiy moliya",
@@ -685,12 +715,20 @@ func (t *tools) contentAudit(ctx context.Context, _ json.RawMessage) (any, error
 	}
 	paired := func(typ, key string) bool { return key != "" && len(pairs[typ+"|"+key]) >= 2 }
 
+	// A scheduled draft is waiting on purpose, not forgotten.
+	scheduled := map[string]bool{}
+	for _, p := range ps {
+		if p.Draft && p.PublishAt != nil {
+			scheduled["post|"+p.Slug] = true
+		}
+	}
+
 	common := func(typ, slug, title, desc, body, key string, draft bool, updated time.Time, tags []string) []string {
 		var is []string
 		if !paired(typ, key) {
 			is = append(is, "no_translation_pair")
 		}
-		if draft {
+		if draft && !scheduled[typ+"|"+slug] {
 			is = append(is, "draft_"+strconv.Itoa(int(today.Sub(updated).Hours()/24))+"_days_untouched")
 		}
 		if strings.TrimSpace(desc) == "" {

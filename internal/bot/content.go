@@ -135,6 +135,9 @@ func (b *Bot) applyPostAction(ctx context.Context, data string) string {
 		        WHEN published_at IS NULL AND NOT $2::boolean THEN now()
 		        ELSE published_at
 		    END,
+		    -- A hand toggle ends any schedule; a leftover publish_at would
+		    -- republish the post the moment it went back to draft.
+		    publish_at = NULL,
 		    updated_at = now()
 		WHERE id = $1::uuid
 		RETURNING locale, slug, title`,

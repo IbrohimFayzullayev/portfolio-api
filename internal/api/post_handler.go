@@ -180,6 +180,16 @@ func (s *Server) handlePublishPost(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "failed to update publish state", err)
 		return
 	}
+	// Publishing or unpublishing by hand ends any schedule. Left in place, a
+	// publish_at on a published post would be acted on the moment the post
+	// went back to draft: the scheduler publishes every draft that is due.
+	if post.PublishAt != nil {
+		if _, err := s.pool.Exec(r.Context(), `UPDATE posts SET publish_at = NULL WHERE id = $1`, id); err != nil {
+			s.serverError(w, r, "failed to clear the schedule", err)
+			return
+		}
+		post.PublishAt = nil
+	}
 	// Only on the draft -> published edge. Re-saving a published post is not
 	// news, and announcing it again would be noise.
 	if existing.Draft && !post.Draft {

@@ -102,8 +102,11 @@ type postResponse struct {
 	Date           string     `json:"date"`
 	TranslationKey string     `json:"translation_key"`
 	PublishedAt    *time.Time `json:"published_at"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// When the bot's scheduler will publish this draft; absent when nothing
+	// is scheduled (migration 000007).
+	PublishAt *time.Time `json:"publish_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 func toPostResponse(p db.Post) postResponse {
@@ -121,6 +124,7 @@ func toPostResponse(p db.Post) postResponse {
 		Date:           p.ContentDate.Format(dateLayout),
 		TranslationKey: p.TranslationKey,
 		PublishedAt:    p.PublishedAt,
+		PublishAt:      p.PublishAt,
 		CreatedAt:      p.CreatedAt,
 		UpdatedAt:      p.UpdatedAt,
 	}

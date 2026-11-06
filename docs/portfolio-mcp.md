@@ -26,11 +26,14 @@ Siz (chat) ──▶ Claude Code / Desktop ──▶ Claude modeli
 | `update_post`                                    | Faqat berilgan maydonlarni o'zgartiradi, nashr holatiga tegmaydi                                                                                                | yozish          |
 | `set_post_published`                             | Postni nashr qiladi yoki nashrdan oladi. Client har safar sizdan so'raydi (`destructiveHint`)                                                                   | ommaviy         |
 | `link_translations` | uz va en versiyani bitta `translation_key` bilan bog'laydi. To'qnashuvni oldindan tekshiradi. `content_audit` juft bo'lishi mumkin bo'lganlarni `pair_suggestions` ostida ko'rsatadi | yozish |
+| `schedule_post` | Qoralamani belgilangan vaqtda (Toshkent vaqti) nashr qilishga rejalashtiradi yoki rejani bekor qiladi. Nashrni ops bot scheduler'i bajaradi. Client ruxsat so'raydi | ommaviy |
 | `list_projects`, `get_project`, `update_project` | Loyihalar bilan postlardagi kabi ishlaydi                                                                                                                       | o'qish / yozish |
 | `list_messages`, `mark_message_read`             | Aloqa formasidan kelgan xabarlar                                                                                                                                | o'qish / yozish |
 | `list_invitations`                               | Taklifnoma saytidan kelgan javoblar                                                                                                                             | o'qish          |
 | `system_overview`                                | Uptime, xatolar, deploy, outbox, bot, backup                                                                                                                    | o'qish          |
 | `list_changes` | Agent nimani o'zgartirgani: tool, element, har bir maydonning oldingi va keyingi qiymati, xato urinishlar. Qaytarish uchun ham shu | o'qish |
+| `log_practice` | Ingliz tili mashqini yozadi: `/qildim` sintaksisi (`45 w essay`) yoki tur va daqiqalar | yozish |
+| `add_finance_entry` | Moliya yozuvini qo'shadi. Matnni bot bilan bir xil parser o'qiydi (`taksi 25k`). `dry_run` rejimi faqat qanday o'qilishini ko'rsatadi, saqlamaydi | yozish |
 | `finance_summary`                                | Shaxsiy moliya (sizniki, finbot foydalanuvchilariniki emas)                                                                                                     | o'qish          |
 | `growth_summary`                                 | Ingliz tili mashqlari, sprintlar, IELTS mock natijalari                                                                                                         | o'qish          |
 

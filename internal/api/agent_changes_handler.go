@@ -24,7 +24,9 @@ var (
 	agentToolRe  = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 )
 
-var agentTargetTypes = map[string]bool{"post": true, "project": true, "message": true}
+var agentTargetTypes = map[string]bool{
+	"post": true, "project": true, "message": true, "finance_entry": true, "practice": true,
+}
 
 const (
 	agentMaxTargets  = 10
@@ -60,7 +62,7 @@ func (in *agentChangeInput) validate() error {
 		return fmt.Errorf("tool must be lowercase letters, digits and _")
 	}
 	if !agentTargetTypes[in.TargetType] {
-		return fmt.Errorf("target_type must be post, project or message")
+		return fmt.Errorf("target_type must be post, project, message, finance_entry or practice")
 	}
 	if len(in.Targets) > agentMaxTargets {
 		return fmt.Errorf("at most %d targets", agentMaxTargets)

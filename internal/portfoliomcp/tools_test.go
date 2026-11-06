@@ -1,6 +1,7 @@
 package portfoliomcp
 
 import (
+	"fmt"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -34,6 +35,8 @@ type fakeAPI struct {
 	puts    []map[string]any
 	read    []string
 	audit   []map[string]any // rows POSTed to /agent-changes
+	growth  []map[string]any // rows POSTed to /growth/logs
+	money   []map[string]any // rows POSTed to /finance/entries
 	noAudit bool             // make the log refuse writes
 }
 
@@ -155,6 +158,29 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				{"month": "2026-10", "amounts": map[string]any{}, "income": map[string]any{}},
 				{"month": "2026-11", "amounts": map[string]any{"UZS": 100}, "income": map[string]any{}},
 			}})
+	case r.Method == "PATCH" && strings.HasSuffix(path, "/schedule"):
+		var in struct {
+			PublishAt *time.Time `json:"publish_at"`
+		}
+		json.NewDecoder(r.Body).Decode(&in)
+		p := f.posts[strings.TrimSuffix(strings.TrimPrefix(path, "/posts/"), "/schedule")]
+		if !p.Draft {
+			write(409, map[string]string{"error": "only a draft can be scheduled"})
+			return
+		}
+		p.PublishAt = in.PublishAt
+		write(200, p)
+	case r.Method == "POST" && path == "/growth/logs":
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		f.growth = append(f.growth, m)
+		m["id"] = "88888888-8888-8888-8888-888888888888"
+		write(201, m)
+	case r.Method == "POST" && path == "/finance/entries":
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		f.money = append(f.money, m)
+		write(201, map[string]any{"id": "99999999-9999-9999-9999-999999999999"})
 	case r.Method == "POST" && path == "/agent-changes":
 		if f.noAudit {
 			write(500, map[string]string{"error": "could not record the change"})
@@ -554,5 +580,101 @@ func TestListChangesShortensLongValues(t *testing.T) {
 	}
 	if f.audit[0]["changes"].(map[string]any)["body"].(map[string]any)["to"] != long {
 		t.Error("the log itself keeps the whole value")
+	}
+}
+
+func TestSchedulePost(t *testing.T) {
+	f := newFake(t)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+
+	res := call(t, srv.URL,
+		`schedule_post {"id":"`+idUz+`","at":"2026-11-10 09:00"}`,
+		`schedule_post {"id":"`+idEn+`","at":"2026-11-10 09:00"}`,
+		`schedule_post {"id":"`+idUz+`","at":"10-noyabr"}`,
+		`schedule_post {"id":"`+idUz+`","at":"2026-11-10 09:00","cancel":true}`,
+		`list_posts {"locale":"uz"}`,
+		`schedule_post {"id":"`+idUz+`","cancel":true}`,
+		`schedule_post {"id":"`+idUz+`","cancel":true}`,
+	)
+	if res[0]["publish_at_tashkent"] != "2026-11-10 09:00" {
+		t.Errorf("schedule: %v", res[0])
+	}
+	if e, _ := res[1]["error"].(string); !strings.Contains(e, "already published") {
+		t.Errorf("a published post cannot be scheduled: %v", res[1])
+	}
+	if res[2]["error"] == nil || res[3]["error"] == nil {
+		t.Errorf("bad time and at+cancel must be refused: %v / %v", res[2], res[3])
+	}
+	if p := res[4]["posts"].([]any)[0].(map[string]any); p["scheduled_for"] != "2026-11-10 09:00" {
+		t.Errorf("list_posts must show the schedule: %v", p)
+	}
+	if f.posts[idUz].PublishAt != nil {
+		t.Error("cancel must clear publish_at")
+	}
+	if res[6]["unchanged"] != true {
+		t.Errorf("a second cancel is a no-op: %v", res[6])
+	}
+	got := []string{}
+	for _, a := range f.audit {
+		pa := a["changes"].(map[string]any)["publish_at"].(map[string]any)
+		got = append(got, fmt.Sprintf("%v>%v", pa["from"], pa["to"]))
+	}
+	if strings.Join(got, " ") != ">2026-11-10 09:00 2026-11-10 09:00>" {
+		t.Errorf("audit: %v", got)
+	}
+}
+
+func TestLogPractice(t *testing.T) {
+	f := newFake(t)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+
+	res := call(t, srv.URL,
+		`log_practice {"text":"kecha 30 s part 1"}`,
+		`log_practice {"kind":"writing","minutes":45,"note":"essay 2"}`,
+		`log_practice {"note":"nothing else"}`,
+	)
+	if len(f.growth) != 2 {
+		t.Fatalf("growth rows: %v", f.growth)
+	}
+	// now is 2026-11-04 17:00 in Tashkent.
+	if g := f.growth[0]; g["kind"] != "speaking" || g["minutes"] != float64(30) || g["day"] != "2026-11-03" {
+		t.Errorf("text: %v", g)
+	}
+	if g := f.growth[1]; g["kind"] != "writing" || g["day"] != "2026-11-04" || g["note"] != "essay 2" {
+		t.Errorf("fields: %v", g)
+	}
+	if res[2]["error"] == nil {
+		t.Errorf("no kind and minutes: %v", res[2])
+	}
+	if len(f.audit) != 2 || f.audit[0]["target_type"] != "practice" {
+		t.Errorf("audit: %v", f.audit)
+	}
+}
+
+func TestAddFinanceEntry(t *testing.T) {
+	f := newFake(t)
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+
+	res := call(t, srv.URL,
+		`add_finance_entry {"text":"taksi 25k","dry_run":true}`,
+		`add_finance_entry {"text":"kecha tushlik 45k"}`,
+		`add_finance_entry {"text":"salom"}`,
+	)
+	parsed := res[0]["parsed"].(map[string]any)
+	if parsed["category"] != "transport" || parsed["amount_minor"] != float64(25_000_00) || len(f.money) != 1 {
+		t.Errorf("dry run must parse and not save: %v (saved %d)", parsed, len(f.money))
+	}
+	m := f.money[0]
+	if m["kind"] != "expense" || m["amount_minor"] != float64(45_000_00) || m["spent_on"] != "2026-11-03" || m["category"] != "ovqat" {
+		t.Errorf("saved: %v", m)
+	}
+	if e, _ := res[2]["error"].(string); !strings.Contains(e, "no amount") {
+		t.Errorf("a line without an amount: %v", res[2])
+	}
+	if len(f.audit) != 1 || f.audit[0]["target_type"] != "finance_entry" || f.audit[0]["changes"].(map[string]any)["text"] != "kecha tushlik 45k" {
+		t.Errorf("audit: %v", f.audit)
 	}
 }

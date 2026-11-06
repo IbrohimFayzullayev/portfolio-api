@@ -162,9 +162,13 @@ func (s *Server) routes() *chi.Mux {
 		// English practice and books (written by the bot), and the personal
 		// reference notes. Read-only, for the dashboard and the Mini App.
 		r.Route("/growth", func(r chi.Router) {
-			r.Use(s.adminOrViewer)
-			r.Get("/summary", s.handleGrowthSummary)
-			r.Get("/books", s.handleBooksSummary)
+			r.Group(func(r chi.Router) {
+				r.Use(s.adminOrViewer)
+				r.Get("/summary", s.handleGrowthSummary)
+				r.Get("/books", s.handleBooksSummary)
+			})
+			// The same row /qildim writes, for the MCP server. Admin only.
+			r.With(s.authMiddleware).Post("/logs", s.handleCreateGrowthLog)
 		})
 		r.Route("/notes", func(r chi.Router) {
 			r.Use(s.adminOrViewer)
@@ -181,6 +185,8 @@ func (s *Server) routes() *chi.Mux {
 				r.Get("/{id}", s.handleGetPost)
 				r.Put("/{id}", s.handleUpdatePost)
 				r.Patch("/{id}/publish", s.handlePublishPost)
+				// publish_at for the bot's scheduler (schedule_handler.go).
+				r.Patch("/{id}/schedule", s.handleSchedulePost)
 				r.Delete("/{id}", s.handleDeletePost)
 			})
 

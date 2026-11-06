@@ -111,6 +111,25 @@ services:
       FINBOT_ADMIN_SEES_MONEY: ${FINBOT_ADMIN_SEES_MONEY:-true}
     networks: [internal]
 
+  # The MCP server for a custom connector in the Claude app (web, desktop,
+  # phone): Streamable HTTP with OAuth in front (docs/portfolio-mcp.md).
+  # Same image, its own entrypoint. It opens no database - every tool goes
+  # through the api service, signed in as the admin - and without
+  # MCP_SIGNING_KEY it starts and idles.
+  mcp:
+    image: ${REGISTRY}/portfolio-api:${TAG:-latest}
+    entrypoint: ["/app/portfolio-mcp"]
+    restart: unless-stopped
+    depends_on: [api]
+    environment:
+      MCP_HTTP_ADDR: ":8091"
+      MCP_PUBLIC_URL: https://${MCP_DOMAIN:-mcp.fayzullayev.uz}
+      MCP_SIGNING_KEY: ${MCP_SIGNING_KEY:-}
+      PORTFOLIO_API_URL: http://api:8080
+      PORTFOLIO_API_EMAIL: ${PORTFOLIO_API_EMAIL:-}
+      PORTFOLIO_API_PASSWORD: ${PORTFOLIO_API_PASSWORD:-}
+    networks: [internal]
+
   web:
     image: ${REGISTRY}/portfolio:${TAG:-latest}
     restart: unless-stopped
@@ -154,7 +173,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    # finbot is deliberately NOT here. Caddy is the one door to every site;
+    # finbot and mcp are deliberately NOT here. Caddy is the one door to every site;
     # if it waits on a service that cannot start, everything goes dark with
     # it. A missing upstream should be a 502 on its own domain, nothing more.
     depends_on: [web, dashboard, api, umami]
@@ -171,6 +190,7 @@ services:
       # whole Caddyfile (see the comment on the Umami block there).
       STATS_DOMAIN: ${STATS_DOMAIN:-stats.fayzullayev.uz}
       FINBOT_DOMAIN: ${FINBOT_DOMAIN:-hisob.fayzullayev.uz}
+      MCP_DOMAIN: ${MCP_DOMAIN:-mcp.fayzullayev.uz}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Other projects' site blocks (see the end of the Caddyfile).

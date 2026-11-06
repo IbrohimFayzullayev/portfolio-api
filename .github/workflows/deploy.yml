@@ -155,13 +155,16 @@ jobs:
             # applies to every service in the file, so a dependency must never
             # be resolved at this deploy's tag. db is a fixed image and is
             # already running.
-            # finbot only once the server's compose file has it: that file is
+            # finbot and mcp only once the server's compose file has them: that file is
             # copied by hand (runbook), and naming a service it does not know
             # would fail the whole deploy, API included.
             svcs="api bot"
-            if docker compose -f docker-compose.prod.yml --env-file .env config --services | grep -qx finbot; then
-              svcs="$svcs finbot"
-            fi
+            known=$(docker compose -f docker-compose.prod.yml --env-file .env config --services)
+            for opt in finbot mcp; do
+              if echo "$known" | grep -qx "$opt"; then
+                svcs="$svcs $opt"
+              fi
+            done
             docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps $svcs
 
             # A 200 from the site proves SOMETHING is answering, not that it is

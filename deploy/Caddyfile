@@ -63,6 +63,15 @@
 	}
 }
 
+# The MCP server for the Claude app's custom connector (docs/portfolio-mcp.md).
+# Behind it: the OAuth endpoints, their metadata, and /mcp, which wants a
+# token. The default keeps the address a real name before MCP_DOMAIN is set
+# (see the Umami block above for what an empty address does).
+{$MCP_DOMAIN:mcp.fayzullayev.uz} {
+	encode gzip zstd
+	reverse_proxy mcp:8091
+}
+
 # Other projects on this server (ranklo.uz, ...), one file each in
 # /opt/portfolio/caddy-sites/ on the host. They live outside this file on
 # purpose: this file is copied from the repo, and on 2026-10-29 copying it

@@ -129,6 +129,52 @@ PORTFOLIO_API_EMAIL=... PORTFOLIO_API_PASSWORD=... go run ./cmd/portfolio-mcp
 
 Bu buyruq stdio'da JSON-RPC kutadi. Uni qo'lda emas, `claude mcp add portfolio-local -- go run ./cmd/portfolio-mcp` orqali ulang.
 
+## Claude ilovasiga ulash (web, desktop, telefon)
+
+SSH usuli faqat Mac'dagi Claude Code va Desktop'da ishlaydi. Claude ilovasining hamma joyida, jumladan telefonda ishlatish uchun `mcp` servisi bor. U Streamable HTTP transportida, OAuth bilan ishlaydi.
+
+```
+Claude ilovasi ──HTTPS──▶ Caddy (mcp.fayzullayev.uz) ──▶ mcp:8091 ──▶ api:8080
+                          /mcp         token talab qiladi
+                          /authorize   kirish sahifasi (admin email va parol)
+                          /token, /register, /.well-known/*
+```
+
+- **Kim kira oladi.** Faqat admin. Kirish sahifasi email va parolni API'ning o'z `/auth/login` endpoint'i orqali tekshiradi, alohida parol yo'q. Bir IP manzildan 15 daqiqada 5 marta noto'g'ri urinilsa, o'sha manzil bloklanadi. Hamma manzillardan jami soatiga 20 marta noto'g'ri urinilsa, kirish bir soatga butunlay yopiladi.
+- **Tokenlar.** Access token 1 soat, refresh token 30 kun amal qiladi. Refresh token har ishlatilganda yangisiga almashtiriladi. Hech narsa bazada saqlanmaydi: hammasi `MCP_SIGNING_KEY` bilan imzolanadi. **Hammani chiqarib yuborish** uchun kalitni almashtirib, `mcp` ni qayta ishga tushirish kifoya. Claude o'zi qaytadan ro'yxatdan o'tadi va sizdan yana kirishni so'raydi.
+- **Qaytish manzillari.** Faqat Claude'ning callback'lari (`claude.ai` va `claude.com`) va localhost qabul qilinadi.
+- **Kod:** `internal/mcp/http.go` (transport), `internal/mcpauth` (OAuth), `cmd/portfolio-mcp -http`.
+
+### Bir martalik sozlash
+
+1. **DNS.** `mcp.fayzullayev.uz` uchun server IP'siga A yozuvi qo'shing (boshqa domenlar kabi).
+2. **Server `.env` fayli.** `PORTFOLIO_API_EMAIL` va `PORTFOLIO_API_PASSWORD` allaqachon bor bo'lishi kerak. Qo'shing:
+   ```sh
+   echo "MCP_SIGNING_KEY=$(openssl rand -hex 32)" >> /opt/portfolio/.env
+   ```
+3. **Compose va Caddyfile.** Runbook qoidasiga ko'ra: avval `diff`, keyin tekshirish, keyin almashtirish.
+   ```sh
+   scp deploy/docker-compose.prod.yml deploy/Caddyfile ibrohim@SERVER_IP:/opt/portfolio/new/
+   ssh ibrohim@SERVER_IP
+   cd /opt/portfolio
+   diff -u docker-compose.prod.yml new/docker-compose.prod.yml
+   diff -u Caddyfile new/Caddyfile
+   cp new/docker-compose.prod.yml new/Caddyfile .
+   docker compose -f docker-compose.prod.yml --env-file .env config >/dev/null && echo compose-ok
+   docker compose -f docker-compose.prod.yml exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+   docker compose -f docker-compose.prod.yml --env-file .env up -d --no-deps mcp
+   docker compose -f docker-compose.prod.yml exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+   ```
+   Caddy qayta ishga tushirilmaydi, faqat `reload` qilinadi, shuning uchun boshqa saytlar to'xtamaydi. `MCP_DOMAIN` ning standart qiymati `mcp.fayzullayev.uz`, uni `.env` ga yozish shart emas.
+4. **Tekshirish:**
+   ```sh
+   curl -s https://mcp.fayzullayev.uz/.well-known/oauth-authorization-server
+   curl -si https://mcp.fayzullayev.uz/mcp | head -3    # 401 va WWW-Authenticate
+   ```
+5. **Claude'da:** Settings → Connectors → **Add custom connector**. Nomini `Portfolio` deb qo'ying, URL: `https://mcp.fayzullayev.uz/mcp`. **Connect** bosilgach, kirish sahifasi ochiladi: admin email va parolingizni kiritib, **Ruxsat berish** ni bosing. Shundan keyin connector telefondagi Claude ilovasida ham paydo bo'ladi.
+
+CI keyingi deploy'lardan boshlab `mcp` servisini ham yangilaydi: server compose faylida bu servis bo'lsa, u avtomatik deploy ro'yxatiga qo'shiladi. SSH usuli ham ishlashda davom etadi. Bir xil tool'lar ikki marta ko'rinmasligi uchun Claude Desktop'da ulardan bittasini qoldiring.
+
 ## Birinchi sinov uchun so'rovlar
 
 - "Kontent auditini qil va eng muhim 3 ta ishni ayt."

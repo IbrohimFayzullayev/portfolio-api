@@ -67,6 +67,14 @@ func (c *Client) token(ctx context.Context, fresh bool) (string, error) {
 	return c.Token, nil
 }
 
+// VerifyLogin checks an email and password with the API's own sign-in and
+// keeps nothing: the HTTP server's login page uses it to decide who may
+// connect. A wrong password is an APIError with status 401.
+func (c *Client) VerifyLogin(ctx context.Context, email, password string) error {
+	return c.send(ctx, http.MethodPost, "/api/v1/auth/login", nil,
+		map[string]string{"email": email, "password": password}, nil, "")
+}
+
 // Do calls the API with the admin's token. An expired token is renewed
 // once, when there are credentials to renew it with.
 func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body, out any) error {

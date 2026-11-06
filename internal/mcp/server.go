@@ -1,13 +1,20 @@
-// Package mcp is a small Model Context Protocol server over stdio: the part
-// of the protocol a tool server needs - initialize, tools, prompts, ping -
-// and nothing else. No resources, no sampling, no HTTP transport.
+// Package mcp is a small Model Context Protocol server: the part of the
+// protocol a tool server needs - initialize, tools, prompts, ping - over
+// stdio and over Streamable HTTP. No resources, no sampling, no server-sent
+// event streams, no sessions: every tool call is one request and one answer.
 //
-// Why by hand and not the official Go SDK: the stdio subset is one JSON
-// object per line and five methods, which is less code than the glue around
-// a dependency (see the ecosystem rule on dependencies). If this ever needs
-// Streamable HTTP or OAuth - a connector in the Claude app, say - that is the
-// moment to switch to github.com/modelcontextprotocol/go-sdk; the tools here
-// are plain functions and move over unchanged.
+// Why by hand and not the official Go SDK: that subset is one JSON object
+// per message and five methods, which is less code than the glue around a
+// dependency (see the ecosystem rule on dependencies), and every line of it
+// is tested here. If the server ever needs what is left out - streaming
+// progress, sessions, sampling - that is the moment to move to
+// github.com/modelcontextprotocol/go-sdk; the tools are plain functions and
+// move over unchanged.
+//
+// Two transports share one handler: stdio (Serve) for a client that starts
+// the server itself, and Streamable HTTP (http.go) for a remote client such
+// as a connector in the Claude app. Authorization is not this package's
+// business: the HTTP handler is wrapped by internal/mcpauth.
 //
 // The package knows nothing about the portfolio: internal/portfoliomcp
 // registers the tools. The same server can carry a different tool set (the
@@ -129,33 +136,40 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 		if len(line) == 0 {
 			continue
 		}
-		var req request
-		if err := json.Unmarshal(line, &req); err != nil {
-			s.write(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{codeParse, "parse error"}})
-			continue
+		if resp := s.process(ctx, line); resp != nil {
+			s.write(*resp)
 		}
-		if req.JSONRPC != "2.0" || req.Method == "" {
-			if len(req.ID) > 0 {
-				s.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{codeInvalidRequest, "invalid request"}})
-			}
-			continue
-		}
-		result, rerr := s.handle(ctx, req)
-		if len(req.ID) == 0 {
-			continue // notifications get no answer, not even an error
-		}
-		resp := response{JSONRPC: "2.0", ID: req.ID}
-		if rerr != nil {
-			resp.Error = rerr
-		} else {
-			resp.Result = result
-		}
-		s.write(resp)
 	}
 	if err := sc.Err(); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	return nil
+}
+
+// process handles one JSON-RPC message, whatever carried it (a stdin line,
+// an HTTP body). nil means there is nothing to answer: a notification.
+func (s *Server) process(ctx context.Context, raw []byte) *response {
+	var req request
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return &response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{codeParse, "parse error"}}
+	}
+	if req.JSONRPC != "2.0" || req.Method == "" {
+		if len(req.ID) > 0 {
+			return &response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{codeInvalidRequest, "invalid request"}}
+		}
+		return nil
+	}
+	result, rerr := s.handle(ctx, req)
+	if len(req.ID) == 0 {
+		return nil // notifications get no answer, not even an error
+	}
+	resp := &response{JSONRPC: "2.0", ID: req.ID}
+	if rerr != nil {
+		resp.Error = rerr
+	} else {
+		resp.Result = result
+	}
+	return resp
 }
 
 func (s *Server) write(r response) {
